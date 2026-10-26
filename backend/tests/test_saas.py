@@ -233,3 +233,18 @@ def test_payroll_period_validation():
 
     with pytest.raises(ValidationError):
         PayrollRun(user_id=1, period_start=date(2026, 2, 1), period_end=date(2026, 1, 1))
+
+
+async def test_concurrent_startup_seeding_is_safe():
+    import asyncio
+
+    from sqlalchemy import func, select
+
+    from shared.db.seed import seed_demo_data
+    from shared.db.session import AsyncSessionLocal
+    from shared.models.entities import Organization, User
+
+    await asyncio.gather(*(seed_demo_data() for _ in range(4)))
+    async with AsyncSessionLocal() as db:
+        assert (await db.execute(select(func.count()).select_from(Organization))).scalar() == 1
+        assert (await db.execute(select(func.count()).select_from(User))).scalar() == 4

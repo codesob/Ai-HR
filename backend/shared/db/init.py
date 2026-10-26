@@ -1,6 +1,8 @@
+import asyncio
 import logging
 
 from sqlalchemy import text
+from sqlalchemy.exc import DatabaseError
 
 from shared.core.config import get_settings
 from shared.db.seed import seed_demo_data
@@ -15,8 +17,16 @@ async def init_database() -> None:
     if settings.auto_create_schema:
         import shared.models.entities  # noqa: F401  (register all tables on Base.metadata)
 
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+        for attempt in range(5):
+            try:
+                async with engine.begin() as conn:
+                    await conn.run_sync(Base.metadata.create_all)
+                break
+            except DatabaseError:
+                # Concurrent workers can collide ("already exists" / "database is locked"); the retry sees their tables.
+                if attempt == 4:
+                    raise
+                await asyncio.sleep(0.2 * (attempt + 1))
     if settings.seed_demo_data:
         await seed_demo_data()
 

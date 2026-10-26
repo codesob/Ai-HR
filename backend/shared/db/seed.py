@@ -11,6 +11,15 @@ DEMO_PASSWORD = "demo12345"
 
 
 async def seed_demo_data() -> None:
+    """Idempotent and safe when several workers or services run it at the same time."""
+    try:
+        await _seed()
+    except IntegrityError:
+        # Another process inserted the demo org first; its transaction owns the seed.
+        pass
+
+
+async def _seed() -> None:
     from shared.models.entities import Job, Organization, User, UserRole
 
     async with AsyncSessionLocal() as db:
@@ -72,8 +81,4 @@ async def seed_demo_data() -> None:
                 ),
             ]
         )
-        try:
-            await db.commit()
-        except IntegrityError:
-            # Several services start at once; another one seeded first.
-            await db.rollback()
+        await db.commit()
