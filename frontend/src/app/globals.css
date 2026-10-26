@@ -1,6 +1,31 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import 'tailwindcss';
+
+@theme {
+  --color-brand-50: #eef2ff;
+  --color-brand-100: #e0e7ff;
+  --color-brand-500: #6366f1;
+  --color-brand-600: #4f46e5;
+  --color-brand-700: #4338ca;
+  --color-brand-900: #312e81;
+}
+
+/*
+  The default border color has changed to `currentcolor` in Tailwind CSS v4,
+  so we've added these compatibility styles to make sure everything still
+  looks the same as it did with Tailwind CSS v3.
+
+  If we ever want to remove these styles, we need to add an explicit border
+  color utility to any element that depends on these defaults.
+*/
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-gray-200, currentcolor);
+  }
+}
 
 :root {
   --bg: #0f172a;
@@ -27,7 +52,7 @@ main {
 }
 
 .card {
-  @apply rounded-[2rem] border border-slate-700/60 bg-slate-900/85 p-6 shadow-[0_24px_80px_-48px_rgba(15,23,42,0.9)] backdrop-blur;
+  @apply rounded-4xl border border-slate-700/60 bg-slate-900/85 p-6 shadow-[0_24px_80px_-48px_rgba(15,23,42,0.9)] backdrop-blur-sm;
 }
 
 .btn-primary {
@@ -39,7 +64,7 @@ main {
 }
 
 .input {
-  @apply w-full rounded-2xl border border-slate-600 bg-slate-900 px-4 py-3 text-slate-100 placeholder:text-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500;
+  @apply w-full rounded-2xl border border-slate-600 bg-slate-900 px-4 py-3 text-slate-100 placeholder:text-slate-500 focus:border-indigo-500 focus:outline-hidden focus:ring-1 focus:ring-indigo-500;
 }
 
 .badge {

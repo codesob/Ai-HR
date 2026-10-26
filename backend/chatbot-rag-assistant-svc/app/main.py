@@ -1,30 +1,13 @@
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from shared.core.config import get_settings
-from shared.db.init import init_database
+import asyncio
+
+from shared.core.app import create_service_app
+from shared.services.rag_chatbot import seed_knowledge_base
 
 from app.api.chat import router as chat_router
 
-settings = get_settings()
-app = FastAPI(title="chatbot-rag-assistant-svc")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.cors_origin_list,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-prefix = settings.api_v1_prefix
-app.include_router(chat_router, prefix=prefix)
+async def seed_knowledge() -> None:
+    await asyncio.to_thread(seed_knowledge_base)
 
 
-@app.on_event("startup")
-async def startup() -> None:
-    await init_database()
-
-
-@app.get("/health")
-async def health():
-    return {"status": "ok", "service": "chatbot-rag-assistant-svc"}
+app = create_service_app("chatbot-rag-assistant-svc", [chat_router], on_startup=[seed_knowledge])

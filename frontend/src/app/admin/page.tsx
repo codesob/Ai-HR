@@ -1,41 +1,19 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { LoginForm } from "@/components/LoginForm";
+import { AuthGate } from "@/components/AuthGate";
 import { PageHeader } from "@/components/PageHeader";
-import { api, Analytics } from "@/lib/api";
-import { clearToken, getToken } from "@/lib/auth";
+import { api, type Analytics } from "@/lib/api";
 
-export default function AdminPage() {
-  const [authed, setAuthed] = useState(false);
+function Dashboard() {
   const [data, setData] = useState<Analytics | null>(null);
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    if (getToken()) {
-      setAuthed(true);
-    }
+    api.analytics().then(setData).catch((e) => setError(e.message));
   }, []);
 
-  useEffect(() => {
-    if (!authed) return;
-    api.analytics().then(setData).catch(console.error);
-  }, [authed]);
-
-  function handleLogout() {
-    clearToken();
-    setAuthed(false);
-    setData(null);
-  }
-
-  if (!authed) {
-    return (
-      <div className="space-y-6">
-        <h1 className="text-2xl font-bold">Admin Analytics</h1>
-        <LoginForm onSuccess={() => setAuthed(true)} />
-      </div>
-    );
-  }
-
+  if (error) return <p role="alert" className="text-red-400">{error}</p>;
   if (!data) return <p className="text-slate-400">Loading analytics…</p>;
 
   const funnelEntries = Object.entries(data.funnel).filter(([, v]) => v > 0);
@@ -45,11 +23,6 @@ export default function AdminPage() {
       <PageHeader
         title="HR Analytics Dashboard"
         subtitle="Hiring funnel, match quality, source effectiveness"
-        action={
-          <button type="button" className="btn-secondary w-full sm:w-auto" onClick={handleLogout}>
-            Logout
-          </button>
-        }
       />
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -95,6 +68,9 @@ export default function AdminPage() {
         <div className="card">
           <h2 className="mb-4 font-semibold">Source Effectiveness</h2>
           <ul className="space-y-2 text-sm">
+            {Object.keys(data.source_effectiveness).length === 0 && (
+              <li className="text-slate-500">No applications yet</li>
+            )}
             {Object.entries(data.source_effectiveness).map(([src, n]) => (
               <li key={src} className="flex justify-between">
                 <span className="capitalize">{src.replace("_", " ")}</span>
@@ -105,24 +81,14 @@ export default function AdminPage() {
         </div>
       </div>
 
-      <div className="card">
-        <h2 className="mb-4 font-semibold">Platform System</h2>
-        <p className="text-sm text-slate-400">This HR platform is built for operational visibility and AI-assisted recruiting.</p>
-        <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {[
-            "Next.js",
-            "FastAPI",
-            "PostgreSQL",
-            "Redis",
-            "Qdrant",
-            "Sentence Transformers",
-          ].map((item) => (
-            <div key={item} className="rounded-3xl border border-slate-700/70 bg-slate-950/90 p-4 text-sm text-slate-200">
-              {item}
-            </div>
-          ))}
-        </div>
-      </div>
     </div>
+  );
+}
+
+export default function AdminPage() {
+  return (
+    <AuthGate title="Analytics" roles={["admin", "recruiter"]} demoEmail="admin@aihr.demo">
+      {() => <Dashboard />}
+    </AuthGate>
   );
 }

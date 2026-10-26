@@ -17,7 +17,7 @@ Frontend (Next.js) -> API Gateway (FastAPI)
   |-- Notification Service
   |-- Authentication
   `-- Notification hooks
-Databases: SQLite for local/Docker MVP | Redis | Qdrant | Local/S3 uploads
+Databases: PostgreSQL | Redis | Qdrant | Local/S3 uploads
 ```
 
 ### Future (Complete HRIS)
@@ -136,93 +136,99 @@ Databases: PostgreSQL | Redis cache | Qdrant embeddings | S3 storage
 
 ## Quick Start
 
-### With Docker
+### With Docker (recommended)
 
 ```bash
-cp .env.example .env
+cp .env.example .env          # set SECRET_KEY and POSTGRES_PASSWORD
 docker compose up --build
 ```
 
-- Frontend: [http://localhost:3000](http://localhost:3000)
-- API docs: [http://localhost:8000/docs](http://localhost:8000/docs)
-- GraphQL MVP endpoint: [http://localhost:8000/api/v1/graphql](http://localhost:8000/api/v1/graphql)
-- Notification WebSocket: `ws://localhost:8000/api/v1/ws/notifications`
-- Qdrant UI: [http://localhost:6333/dashboard](http://localhost:6333/dashboard)
+- App: [http://localhost:3000](http://localhost:3000). Click **Create your workspace** to sign up a company.
+- API docs (development only): [http://localhost:8000/docs](http://localhost:8000/docs)
 
-Demo users are seeded automatically on startup:
+The `migrate` job applies database migrations before any service starts. In development it also seeds a
+**Demo Company** workspace (careers page at `/careers/demo`):
 
 | Email                 | Password    | Role      |
 | --------------------- | ----------- | --------- |
 | `admin@aihr.demo`     | `demo12345` | Admin     |
 | `recruiter@aihr.demo` | `demo12345` | Recruiter |
+| `employee@aihr.demo`  | `demo12345` | Employee  |
 | `candidate@aihr.demo` | `demo12345` | Candidate |
 
-### Local Development
+Hot reload for backend code: `docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build`.
 
-The frontend can run directly on your machine:
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-For the backend, Docker Compose is the simplest local setup because the API gateway expects the service containers by name. If you want to run services manually, start each FastAPI service on its own port and override the gateway service URLs, for example:
+### Running tests
 
 ```bash
 cd backend
-python -m venv .venv
-# Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+uv venv --python 3.14 && uv pip install -r requirements.txt -r requirements-dev.txt
+pytest -q && ruff check .
 
-# terminal 1
-cd resume-parsing-svc
-uvicorn app.main:app --reload --port 8011
-
-# terminal 2
-cd ../matching-engine-svc
-uvicorn app.main:app --reload --port 8012
-
-# terminal 3
-cd ../api-gateway
-$env:RESUME_SERVICE_URL="http://localhost:8011"
-$env:MATCHING_SERVICE_URL="http://localhost:8012"
-uvicorn main:app --reload --port 8000
+cd ../frontend
+npm ci && npm run lint && npm run typecheck && npm run build
 ```
 
-By default the backend uses SQLite and seeds demo data automatically, so PostgreSQL is not required for local development. Docker Compose also includes PostgreSQL for production-like runs; switch `DATABASE_URL` to `postgresql+asyncpg://aihr:aihr-dev-password@postgres:5432/aihr` to use it.
+### Dependencies
+
+Backend pins are compiled for Python 3.14 on Linux (the container target):
+
+```bash
+cd backend
+uv pip compile requirements.in --upgrade --python-version 3.14 --python-platform linux -o requirements.txt
+```
+
+`requirements-ml.txt` (torch CPU + sentence-transformers) is only installed in the resume, matching and chatbot
+images. In `frontend/`, `typescript` is aliased to the TypeScript 6 API package because `typescript-eslint` does
+not support TypeScript 7 yet; `npm run typecheck` uses the TypeScript 7 compiler.
+
+## Going to Production
+
+Set in `.env` (or your secret manager):
+
+- `ENVIRONMENT=production`. The services then refuse to start with a weak `SECRET_KEY` or SQLite, disable
+  `/docs`, turn off demo seeding and LAN CORS, and send HSTS.
+- `SECRET_KEY` of 32+ random characters, a managed PostgreSQL `DATABASE_URL`, `CORS_ORIGINS`/`FRONTEND_URL`
+  set to your real domain, and `NEXT_PUBLIC_API_URL` set at frontend build time.
+- `STORAGE_BACKEND=s3` with `S3_BUCKET` (resumes are written with SSE-AES256).
+- `SMTP_*` so invitations and interview notices are emailed.
+- `TRUST_PROXY_HEADERS=true` only when running behind a load balancer that sets `X-Forwarded-For`.
+
+Expose only the frontend and `api-gateway` publicly, behind TLS. Every service has `/health` (liveness) and
+`/ready` (database check) endpoints and logs JSON to stdout, including one audit record per write request.
 
 ## Architecture Coverage
 
 Implemented now:
 
-- REST API gateway with CORS, security headers, rate limiting, audit log writes, and MVP GraphQL query support
-- JWT authentication with role-based route protection for sensitive HR operations
-- FastAPI microservices for resume parsing, matching, interview scheduling, analytics, HR ops/onboarding, payroll, chatbot/RAG, and notifications
-- Onboarding plans, leave requests, burnout risk scoring, payroll profile management, payslip generation, and interview workflow automation
-- AI functions including resume extraction, job description generation, semantic matching, explainable scoring, and HR policy chat
-- Notification/event records for applications and interview scheduling
-- WebSocket notification stream endpoint for realtime UI wiring
-- SQLite local default, PostgreSQL Compose option, Redis, Qdrant, and local object storage abstraction
-- Docker Compose and Kubernetes manifests, with Terraform/MLOps folders reserved for production rollout
+- Multi-tenant workspaces: every record is scoped to an organization; company sign-up, team invites with
+  expiring single-use tokens, and public per-company careers pages with candidate sign-up
+- JWT auth (PyJWT, bcrypt) with role-based access; roles can't be self-assigned at sign-up
+- API gateway with Redis-backed rate limiting (stricter on auth), security headers, request IDs, and
+  structured audit logs
+- Alembic migrations and a PostgreSQL-first Compose stack with health-gated startup
+- Resume parsing with upload size limits and local or S3 storage, semantic matching, explainable ranking,
+  application pipeline status, interview scheduling with email notices, leave requests with approvals,
+  payroll runs and payslips, hiring analytics from live data, and a RAG HR policy assistant
 
-Still production-hardening work:
+Not yet built:
 
-- Full GraphQL schema/resolvers beyond the MVP query adapter
-- OAuth provider integration and MFA challenge flow
-- Redis-backed distributed rate limiting instead of in-process buckets
-- Real email/SMS/calendar dispatch providers
-- S3 upload implementation behind the storage abstraction
-- Formal GDPR/CCPA retention policies, SOC2 evidence automation, and complete audit dashboard
+- Billing and plan limits (the `organizations.plan` column is in place)
+- SSO/OAuth, MFA, password reset, and email verification
+- Org-specific policy documents for the HR assistant (it currently uses a shared default policy set)
+- Production Kubernetes manifests (`k8s/deployment.yaml` is a placeholder) and Terraform
+- GDPR data export/deletion endpoints and retention policies
 
 ## Portals
 
 | Portal     | Path         | Users                               |
 | ---------- | ------------ | ----------------------------------- |
 | Recruiter  | `/recruiter` | Pipeline, ranking, scheduling       |
-| Candidate  | `/candidate` | Apply, track status, tests          |
-| Employee   | `/employee`  | Leave, payslips, learning           |
-| Admin      | `/admin`     | Analytics, compliance, AI insights  |
+| Candidate  | `/candidate` | Resume upload, apply, track status  |
+| Employee   | `/employee`  | Leave requests/approvals, payslips  |
+| Admin      | `/admin`     | Hiring analytics                    |
+| Team       | `/team`      | Invite members, careers page link   |
+| Careers    | `/careers/<slug>` | Public job board, candidate sign-up |
 | HR Copilot | `/chat`      | RAG policy and recruiting assistant |
 
 ## Ethical AI
@@ -234,10 +240,10 @@ Still production-hardening work:
 
 ## Tech Stack
 
-- Frontend: Next.js 15, React, TypeScript, Tailwind CSS
-- Backend: FastAPI, SQLAlchemy, async SQLite/PostgreSQL-compatible settings
-- AI: Sentence Transformers, Qdrant, optional OpenAI for LLM extraction
-- Infra: Docker, Kubernetes-ready manifests in `k8s/`
+- Frontend: Next.js 16, React 19, TypeScript 7, Tailwind CSS 4 (Node 24)
+- Backend: Python 3.14, FastAPI, SQLAlchemy 2.1 (async), Alembic, PostgreSQL 18, Redis 8
+- AI: Sentence Transformers (CPU torch), Qdrant 1.20, optional Groq LLM and NVIDIA reranker
+- Infra: Docker multi-stage images (non-root), Docker Compose, GitHub Actions CI
 
 ## Comprehensive HR Features Map
 

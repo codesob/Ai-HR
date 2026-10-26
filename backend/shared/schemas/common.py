@@ -3,37 +3,102 @@ from typing import Any
 
 from pydantic import BaseModel, EmailStr, Field
 
-
-class Token(BaseModel):
-    access_token: str
-    token_type: str = "bearer"
-
-
-class UserCreate(BaseModel):
-    email: EmailStr
-    password: str = Field(min_length=8)
-    full_name: str
-    role: str = "candidate"
+from shared.models.entities import UserRole
 
 
 class UserOut(BaseModel):
     id: int
+    organization_id: int
     email: str
     full_name: str
     role: str
+    is_active: bool = True
+
+    model_config = {"from_attributes": True}
+
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserOut | None = None
+
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=1, max_length=128)
+
+
+class OrgSignup(BaseModel):
+    company_name: str = Field(min_length=2, max_length=255)
+    full_name: str = Field(min_length=1, max_length=255)
+    email: EmailStr
+    password: str = Field(min_length=10, max_length=128)
+
+
+class CandidateRegister(BaseModel):
+    org_slug: str = Field(min_length=1, max_length=64)
+    full_name: str = Field(min_length=1, max_length=255)
+    email: EmailStr
+    password: str = Field(min_length=10, max_length=128)
+
+
+class AcceptInviteRequest(BaseModel):
+    token: str = Field(min_length=10, max_length=256)
+    full_name: str = Field(min_length=1, max_length=255)
+    password: str = Field(min_length=10, max_length=128)
+
+
+class InviteCreate(BaseModel):
+    email: EmailStr
+    role: UserRole
+
+
+class InvitationOut(BaseModel):
+    id: int
+    email: str
+    role: UserRole
+    expires_at: datetime
+    invite_url: str | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class UserUpdate(BaseModel):
+    full_name: str | None = Field(default=None, min_length=1, max_length=255)
+    role: UserRole | None = None
+    is_active: bool | None = None
+
+
+class OrganizationOut(BaseModel):
+    id: int
+    name: str
+    slug: str
+    plan: str
 
     model_config = {"from_attributes": True}
 
 
 class JobCreate(BaseModel):
-    title: str
+    title: str = Field(min_length=2, max_length=255)
     department: str = "Engineering"
-    description: str
+    description: str = Field(min_length=10, max_length=20000)
     requirements: str = ""
     required_skills: list[str] = []
     min_experience_years: float = 0
     salary_min: int | None = None
     salary_max: int | None = None
+
+
+class JobUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=2, max_length=255)
+    department: str | None = None
+    description: str | None = Field(default=None, min_length=10, max_length=20000)
+    requirements: str | None = None
+    required_skills: list[str] | None = None
+    min_experience_years: float | None = None
+    salary_min: int | None = None
+    salary_max: int | None = None
+    status: str | None = Field(default=None, pattern="^(open|closed|draft)$")
 
 
 class JobOut(BaseModel):
@@ -84,11 +149,20 @@ class ApplicationOut(BaseModel):
     match_score: float | None
     rank_score: float | None
     match_explanation: dict[str, Any] | None
+    source: str = "careers_page"
     created_at: datetime
     candidate_name: str | None = None
     job_title: str | None = None
 
     model_config = {"from_attributes": True}
+
+
+class ApplicationStatusUpdate(BaseModel):
+    status: str = Field(pattern="^(applied|screening|assessment|interview|offer|hired|rejected)$")
+
+
+class ResumeText(BaseModel):
+    text: str = Field(min_length=1, max_length=50000)
 
 
 class InterviewCreate(BaseModel):
@@ -112,8 +186,8 @@ class InterviewOut(BaseModel):
 
 
 class ChatMessage(BaseModel):
-    message: str
-    session_id: str | None = None
+    message: str = Field(min_length=1, max_length=2000)
+    session_id: str | None = Field(default=None, max_length=64)
 
 
 class ChatResponse(BaseModel):
@@ -129,7 +203,6 @@ class AnalyticsSummary(BaseModel):
     avg_time_to_hire_days: float | None
     avg_match_score: float | None
     funnel: dict[str, int]
-    diversity_placeholder: dict[str, float]
     source_effectiveness: dict[str, int]
 
 

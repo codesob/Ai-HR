@@ -1,48 +1,99 @@
-from datetime import datetime, timezone
+from datetime import timezone
 from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from shared.models.entities import Application, ApplicationStatus, Job
+from shared.models.entities import Application, ApplicationStatus, Interview, Job, OnboardingTask, User, UserRole
 from shared.schemas.common import AnalyticsSummary
 
 
-async def get_hiring_analytics(db: AsyncSession) -> AnalyticsSummary:
-    jobs_result = await db.execute(select(Job))
-    jobs = jobs_result.scalars().all()
+async def get_hiring_analytics(db: AsyncSession, organization_id: int) -> AnalyticsSummary:
+    jobs = (await db.execute(
+        select(Job.status, func.count()).where(Job.organization_id == organization_id).group_by(Job.status)
+    )).all()
+    job_counts = {status: count for status, count in jobs}
 
-    apps_result = await db.execute(select(Application))
-    applications = apps_result.scalars().all()
-
+    status_rows = (await db.execute(
+        select(Application.status, func.count())
+        .where(Application.organization_id == organization_id)
+        .group_by(Application.status)
+    )).all()
     funnel: dict[str, int] = {s.value: 0 for s in ApplicationStatus}
-    for app in applications:
-        funnel[app.status.value] = funnel.get(app.status.value, 0) + 1
+    for status, count in status_rows:
+        funnel[status.value] = count
 
-    match_scores = [a.match_score for a in applications if a.match_score is not None]
-    avg_match = sum(match_scores) / len(match_scores) if match_scores else None
+    source_rows = (await db.execute(
+        select(Application.source, func.count())
+        .where(Application.organization_id == organization_id)
+        .group_by(Application.source)
+    )).all()
+    total_apps = sum(funnel.values())
+    source_effectiveness = {
+        source or "other": round(100 * count / total_apps) for source, count in source_rows
+    } if total_apps else {}
 
-    hired = [a for a in applications if a.status == ApplicationStatus.HIRED]
-    avg_tth = None
-    if hired:
-        deltas = [
-            (datetime.now(timezone.utc) - a.created_at.replace(tzinfo=timezone.utc)).days
-            for a in hired
-            if a.created_at
-        ]
-        if deltas:
-            avg_tth = sum(deltas) / len(deltas)
+    avg_match = (await db.execute(
+        select(func.avg(Application.match_score)).where(Application.organization_id == organization_id)
+    )).scalar()
+
+    hired = (await db.execute(
+        select(Application.created_at, Application.hired_at).where(
+            Application.organization_id == organization_id, Application.hired_at.is_not(None)
+        )
+    )).all()
+    deltas = [(_utc(h) - _utc(c)).days for c, h in hired if c and h]
+    avg_tth = sum(deltas) / len(deltas) if deltas else None
 
     return AnalyticsSummary(
-        total_jobs=len(jobs),
-        open_jobs=sum(1 for j in jobs if j.status == "open"),
-        total_applications=len(applications),
+        total_jobs=sum(job_counts.values()),
+        open_jobs=job_counts.get("open", 0),
+        total_applications=total_apps,
         avg_time_to_hire_days=avg_tth,
-        avg_match_score=round(avg_match, 3) if avg_match else None,
+        avg_match_score=round(avg_match, 3) if avg_match is not None else None,
         funnel=funnel,
-        diversity_placeholder={"gender_balance_index": 0.72, "note": "Connect HRIS for live DEI metrics"},
-        source_effectiveness={"careers_page": 45, "linkedin": 32, "referral": 18, "other": 5},
+        source_effectiveness=source_effectiveness,
     )
+
+
+async def get_org_metrics(db: AsyncSession, organization_id: int) -> dict[str, Any]:
+    """Live counts that feed the AI dashboards (previously hardcoded)."""
+    async def count(stmt) -> int:
+        return (await db.execute(stmt)).scalar() or 0
+
+    summary = await get_hiring_analytics(db, organization_id)
+    employees = await count(
+        select(func.count()).select_from(User).where(
+            User.organization_id == organization_id,
+            User.role.in_([UserRole.EMPLOYEE, UserRole.RECRUITER, UserRole.ADMIN]),
+            User.is_active,
+        )
+    )
+    pending_interviews = await count(
+        select(func.count()).select_from(Interview).where(
+            Interview.organization_id == organization_id, Interview.status == "scheduled"
+        )
+    )
+    active_onboardings = await count(
+        select(func.count()).select_from(OnboardingTask).where(
+            OnboardingTask.organization_id == organization_id, OnboardingTask.status == "in_progress"
+        )
+    )
+    hired = summary.funnel.get(ApplicationStatus.HIRED.value, 0)
+    offers = summary.funnel.get(ApplicationStatus.OFFER.value, 0) + hired
+    return {
+        "total_applications": summary.total_applications,
+        "pending_interviews": pending_interviews,
+        "recent_hires": hired,
+        "avg_time_to_hire_days": summary.avg_time_to_hire_days,
+        "offer_acceptance_rate": round(hired / offers, 2) if offers else None,
+        "headcount": employees,
+        "active_onboardings": active_onboardings,
+    }
+
+
+def _utc(dt):
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
 def pipeline_metrics(applications: list[dict[str, Any]]) -> dict[str, Any]:

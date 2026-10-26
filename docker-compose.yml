@@ -1,198 +1,165 @@
+# Production-shaped stack. `docker compose up --build` runs it locally with demo data;
+# set ENVIRONMENT=production and real secrets in .env for a deployment.
+# Dev hot-reload: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+x-backend: &backend
+  restart: unless-stopped
+  env_file:
+    - path: .env
+      required: false
+  environment: &backend-env
+    ENVIRONMENT: ${ENVIRONMENT:-development}
+    DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-aihr}:${POSTGRES_PASSWORD:-aihr-dev-password}@postgres:5432/${POSTGRES_DB:-aihr}
+    REDIS_URL: redis://redis:6379/0
+    QDRANT_URL: http://qdrant:6333
+    SECRET_KEY: ${SECRET_KEY:-dev-secret-change-in-production-min-32}
+    AUTO_CREATE_SCHEMA: "false"
+    SEED_DEMO_DATA: "false"
+  depends_on: &backend-deps
+    migrate:
+      condition: service_completed_successfully
+    redis:
+      condition: service_healthy
+
+x-build: &build
+  context: ./backend
+  dockerfile: Dockerfile
+
 services:
-  redis:
-    image: redis:7-alpine
-    ports:
-      - 6379:6379
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-aihr}
+      POSTGRES_USER: ${POSTGRES_USER:-aihr}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aihr-dev-password}
+    volumes:
+      - postgres_data:/var/lib/postgresql
     healthcheck:
-      test:
-        - CMD
-        - redis-cli
-        - ping
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aihr} -d ${POSTGRES_DB:-aihr}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
       retries: 5
 
   qdrant:
-    image: qdrant/qdrant:v1.12.1
-    ports:
-      - 6333:6333
-      - 6334:6334
+    image: qdrant/qdrant:v1.20.0
+    restart: unless-stopped
     volumes:
       - qdrant_data:/qdrant/storage
 
-  postgres:
-    image: postgres:16-alpine
+  migrate:
+    build:
+      <<: *build
+      args: { SERVICE: api-gateway, APP_MODULE: "main:app" }
+    image: aihr/api-gateway
+    env_file:
+      - path: .env
+        required: false
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-aihr}
-      POSTGRES_USER: ${POSTGRES_USER:-aihr}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aihr-dev-password}
+      <<: *backend-env
+      SEED_DEMO_DATA: ${SEED_DEMO_DATA:-}
+    command: ["python", "-m", "shared.db.migrate"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api-gateway:
+    <<: *backend
+    build:
+      <<: *build
+      args: { SERVICE: api-gateway, APP_MODULE: "main:app" }
+    image: aihr/api-gateway
     ports:
-      - 5432:5432
+      - "${API_PORT:-8000}:8000"
+    environment:
+      <<: *backend-env
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-false}
+
+  resume-parsing-svc:
+    <<: *backend
+    build:
+      <<: *build
+      args: { SERVICE: resume-parsing-svc, WITH_ML: "true" }
+    image: aihr/resume-parsing-svc
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test:
-        - CMD-SHELL
-        - pg_isready -U ${POSTGRES_USER:-aihr} -d ${POSTGRES_DB:-aihr}
-      interval: 5s
-      timeout: 3s
-      retries: 10
+      - upload_data:/app/uploads
+
+  matching-engine-svc:
+    <<: *backend
+    build:
+      <<: *build
+      args: { SERVICE: matching-engine-svc, WITH_ML: "true" }
+    image: aihr/matching-engine-svc
+
+  chatbot-rag-assistant-svc:
+    <<: *backend
+    build:
+      <<: *build
+      args: { SERVICE: chatbot-rag-assistant-svc, WITH_ML: "true" }
+    image: aihr/chatbot-rag-assistant-svc
+    environment:
+      <<: *backend-env
+      WEB_CONCURRENCY: "1"
+
+  interview-assistant-svc:
+    <<: *backend
+    build:
+      <<: *build
+      args: { SERVICE: interview-assistant-svc }
+    image: aihr/interview-assistant-svc
+
+  analytics-dashboard-svc:
+    <<: *backend
+    build:
+      <<: *build
+      args: { SERVICE: analytics-dashboard-svc }
+    image: aihr/analytics-dashboard-svc
+
+  hr-ops-onboarding-svc:
+    <<: *backend
+    build:
+      <<: *build
+      args: { SERVICE: hr-ops-onboarding-svc }
+    image: aihr/hr-ops-onboarding-svc
+
+  payroll-automation-svc:
+    <<: *backend
+    build:
+      <<: *build
+      args: { SERVICE: payroll-automation-svc }
+    image: aihr/payroll-automation-svc
+
+  notification-scheduling-svc:
+    <<: *backend
+    build:
+      <<: *build
+      args: { SERVICE: notification-scheduling-svc }
+    image: aihr/notification-scheduling-svc
 
   frontend:
     build:
       context: ./frontend
-      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    image: aihr/frontend
+    restart: unless-stopped
     ports:
-      - 3000:3000
-    environment:
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+      - "${WEB_PORT:-3000}:3000"
     depends_on:
       - api-gateway
 
-  resume-parsing-svc:
-    build:
-      context: ./backend/resume-parsing-svc
-      dockerfile: Dockerfile
-    environment:
-      DATABASE_URL: ${DATABASE_URL:-sqlite+aiosqlite:////data/aihr.db}
-      REDIS_URL: redis://redis:6379/0
-      QDRANT_URL: http://qdrant:6333
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
-    volumes:
-      - ./backend/resume-parsing-svc:/app
-      - ./backend/shared:/app/shared
-      - aihr_db:/data
-      - upload_data:/app/uploads
-
-  matching-engine-svc:
-    build:
-      context: ./backend/matching-engine-svc
-      dockerfile: Dockerfile
-    environment:
-      DATABASE_URL: ${DATABASE_URL:-sqlite+aiosqlite:////data/aihr.db}
-      REDIS_URL: redis://redis:6379/0
-      QDRANT_URL: http://qdrant:6333
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
-    volumes:
-      - ./backend/matching-engine-svc:/app
-      - ./backend/shared:/app/shared
-      - aihr_db:/data
-      - upload_data:/app/uploads
-
-  interview-assistant-svc:
-    build:
-      context: ./backend/interview-assistant-svc
-      dockerfile: Dockerfile
-    environment:
-      DATABASE_URL: ${DATABASE_URL:-sqlite+aiosqlite:////data/aihr.db}
-      REDIS_URL: redis://redis:6379/0
-      QDRANT_URL: http://qdrant:6333
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
-    volumes:
-      - ./backend/interview-assistant-svc:/app
-      - ./backend/shared:/app/shared
-      - aihr_db:/data
-      - upload_data:/app/uploads
-
-  analytics-dashboard-svc:
-    build:
-      context: ./backend/analytics-dashboard-svc
-      dockerfile: Dockerfile
-    environment:
-      DATABASE_URL: ${DATABASE_URL:-sqlite+aiosqlite:////data/aihr.db}
-      REDIS_URL: redis://redis:6379/0
-      QDRANT_URL: http://qdrant:6333
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
-    volumes:
-      - ./backend/analytics-dashboard-svc:/app
-      - ./backend/shared:/app/shared
-      - aihr_db:/data
-      - upload_data:/app/uploads
-
-  hr-ops-onboarding-svc:
-    build:
-      context: ./backend/hr-ops-onboarding-svc
-      dockerfile: Dockerfile
-    environment:
-      DATABASE_URL: ${DATABASE_URL:-sqlite+aiosqlite:////data/aihr.db}
-      REDIS_URL: redis://redis:6379/0
-      QDRANT_URL: http://qdrant:6333
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
-    volumes:
-      - ./backend/hr-ops-onboarding-svc:/app
-      - ./backend/shared:/app/shared
-      - aihr_db:/data
-      - upload_data:/app/uploads
-
-  chatbot-rag-assistant-svc:
-    build:
-      context: ./backend/chatbot-rag-assistant-svc
-      dockerfile: Dockerfile
-    environment:
-      DATABASE_URL: ${DATABASE_URL:-sqlite+aiosqlite:////data/aihr.db}
-      REDIS_URL: redis://redis:6379/0
-      QDRANT_URL: http://qdrant:6333
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
-    volumes:
-      - ./backend/chatbot-rag-assistant-svc:/app
-      - ./backend/shared:/app/shared
-      - aihr_db:/data
-      - upload_data:/app/uploads
-
-  payroll-automation-svc:
-    build:
-      context: ./backend/payroll-automation-svc
-      dockerfile: Dockerfile
-    environment:
-      DATABASE_URL: ${DATABASE_URL:-sqlite+aiosqlite:////data/aihr.db}
-      REDIS_URL: redis://redis:6379/0
-      QDRANT_URL: http://qdrant:6333
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
-    volumes:
-      - ./backend/payroll-automation-svc:/app
-      - ./backend/shared:/app/shared
-      - aihr_db:/data
-      - upload_data:/app/uploads
-
-  notification-scheduling-svc:
-    build:
-      context: ./backend/notification-scheduling-svc
-      dockerfile: Dockerfile
-    environment:
-      DATABASE_URL: ${DATABASE_URL:-sqlite+aiosqlite:////data/aihr.db}
-      REDIS_URL: redis://redis:6379/0
-      QDRANT_URL: http://qdrant:6333
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
-    volumes:
-      - ./backend/notification-scheduling-svc:/app
-      - ./backend/shared:/app/shared
-      - aihr_db:/data
-      - upload_data:/app/uploads
-
-  api-gateway:
-    build:
-      context: ./backend/api-gateway
-      dockerfile: Dockerfile
-    ports:
-      - 8000:8000
-    environment:
-      DATABASE_URL: ${DATABASE_URL:-sqlite+aiosqlite:////data/aihr.db}
-      SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
-    volumes:
-      - ./backend/api-gateway:/app
-      - ./backend/shared:/app/shared
-      - aihr_db:/data
-
 volumes:
-  aihr_db: null
-  postgres_data: null
-  qdrant_data: null
-  upload_data: null
+  postgres_data:
+  qdrant_data:
+  upload_data:

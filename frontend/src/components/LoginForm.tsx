@@ -2,17 +2,13 @@
 
 import { useState } from "react";
 import { api } from "@/lib/api";
-import { setToken } from "@/lib/auth";
+import { setSession } from "@/lib/auth";
 
-export function LoginForm({
-  onSuccess,
-  defaultEmail = "recruiter@aihr.demo",
-}: {
-  onSuccess?: () => void;
-  defaultEmail?: string;
-}) {
-  const [email, setEmail] = useState(defaultEmail);
-  const [password, setPassword] = useState("demo12345");
+const DEMO = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
+
+export function LoginForm({ onSuccess, demoEmail }: { onSuccess?: () => void; demoEmail?: string }) {
+  const [email, setEmail] = useState(DEMO && demoEmail ? demoEmail : "");
+  const [password, setPassword] = useState(DEMO && demoEmail ? "demo12345" : "");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -21,11 +17,11 @@ export function LoginForm({
     setLoading(true);
     setError("");
     try {
-      const { access_token } = await api.login(email, password);
-      setToken(access_token);
+      const { access_token, user } = await api.login(email, password);
+      setSession({ token: access_token, user });
       onSuccess?.();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Login failed");
+      setError(err instanceof Error ? err.message : "Sign-in failed");
     } finally {
       setLoading(false);
     }
@@ -34,21 +30,22 @@ export function LoginForm({
   return (
     <form onSubmit={handleLogin} className="card max-w-md space-y-4">
       <h3 className="font-semibold">Sign in</h3>
-      {error && <p className="text-sm text-red-400">{error}</p>}
-      <input
-        className="input"
-        type="email"
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-        placeholder="Email"
-      />
-      <input
-        className="input"
-        type="password"
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-        placeholder="Password"
-      />
+      {DEMO && demoEmail && <p className="text-xs text-slate-400">Demo account: {demoEmail} / demo12345</p>}
+      {error && (
+        <p role="alert" className="text-sm text-red-400">
+          {error}
+        </p>
+      )}
+      <label className="block space-y-1 text-sm">
+        <span className="text-slate-300">Email</span>
+        <input className="input" type="email" autoComplete="email" required value={email}
+          onChange={(e) => setEmail(e.target.value)} />
+      </label>
+      <label className="block space-y-1 text-sm">
+        <span className="text-slate-300">Password</span>
+        <input className="input" type="password" autoComplete="current-password" required value={password}
+          onChange={(e) => setPassword(e.target.value)} />
+      </label>
       <button type="submit" className="btn-primary w-full" disabled={loading}>
         {loading ? "Signing in…" : "Sign in"}
       </button>

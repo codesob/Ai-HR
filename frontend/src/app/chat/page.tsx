@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { AuthGate } from "@/components/AuthGate";
 import { api } from "@/lib/api";
 
 type Message = { role: "user" | "assistant"; content: string };
@@ -12,7 +13,7 @@ const SUGGESTIONS = [
   "What is the interview process?",
 ];
 
-export default function ChatPage() {
+function Chat() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [sessionId, setSessionId] = useState<string | undefined>();
@@ -27,10 +28,10 @@ export default function ChatPage() {
       const res = await api.chat(text, sessionId);
       setSessionId(res.session_id);
       setMessages((m) => [...m, { role: "assistant", content: res.reply }]);
-    } catch {
+    } catch (err) {
       setMessages((m) => [
         ...m,
-        { role: "assistant", content: "Unable to reach HR assistant. Is the API running?" },
+        { role: "assistant", content: err instanceof Error ? err.message : "The HR assistant is unavailable." },
       ]);
     } finally {
       setLoading(false);
@@ -97,5 +98,13 @@ export default function ChatPage() {
         </form>
       </div>
     </div>
+  );
+}
+
+export default function ChatPage() {
+  return (
+    <AuthGate title="HR Assistant">
+      {() => <Chat />}
+    </AuthGate>
   );
 }

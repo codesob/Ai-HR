@@ -1,27 +1,22 @@
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+import logging
+
+import httpx
+import jwt
+from fastapi import Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
-import httpx
 
 from shared.api.auth import router as auth_router
-from shared.api.rate_limit import enforce_rate_limit
+from shared.api.auth import users_router
+from shared.api.rate_limit import client_ip, is_rate_limited
+from shared.core.app import create_service_app
 from shared.core.config import get_settings
-from shared.db.init import init_database
+from shared.core.logging import request_id_var
+from shared.core.security import decode_access_token
 from shared.services.audit import write_audit_event
 
-app = FastAPI(title="API Gateway")
-
+logger = logging.getLogger(__name__)
 settings = get_settings()
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.cors_origin_list,
-    allow_origin_regex=settings.cors_origin_regex,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-app.include_router(auth_router, prefix=settings.api_v1_prefix)
-
 
 SERVICES = {
     "resumes": settings.resume_service_url,
@@ -36,91 +31,111 @@ SERVICES = {
     "notifications": settings.notification_service_url,
 }
 
+HOP_BY_HOP = {
+    "connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailers",
+    "transfer-encoding", "upgrade", "host", "content-length", "content-encoding",
+}
 
-@app.on_event("startup")
-async def startup() -> None:
-    await init_database()
+_client: httpx.AsyncClient | None = None
+
+
+def get_client() -> httpx.AsyncClient:
+    global _client
+    if _client is None:
+        _client = httpx.AsyncClient(
+            timeout=httpx.Timeout(settings.upstream_timeout_seconds, connect=5.0),
+            limits=httpx.Limits(max_connections=200, max_keepalive_connections=50),
+        )
+    return _client
+
+
+async def close_client() -> None:
+    if _client is not None:
+        await _client.aclose()
+
+
+app = create_service_app("api-gateway", [auth_router, users_router], on_shutdown=[close_client])
+
+
+def _claims(request: Request) -> dict:
+    auth = request.headers.get("authorization", "")
+    if not auth.lower().startswith("bearer "):
+        return {}
+    try:
+        return decode_access_token(auth[7:])
+    except jwt.PyJWTError:
+        return {}
 
 
 @app.middleware("http")
-async def security_middleware(request: Request, call_next):
-    await enforce_rate_limit(request)
+async def edge_middleware(request: Request, call_next):
+    path = request.url.path
+    if path.startswith(settings.api_v1_prefix) and request.method != "OPTIONS":
+        is_auth = path.startswith(f"{settings.api_v1_prefix}/auth/") and request.method == "POST"
+        limited = await is_rate_limited(
+            request,
+            bucket="auth" if is_auth else "api",
+            limit=settings.auth_rate_limit_requests if is_auth else settings.rate_limit_requests,
+        )
+        if limited:
+            return JSONResponse({"detail": "Too many requests"}, status_code=429,
+                                headers={"Retry-After": str(settings.rate_limit_window_seconds)})
+
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "no-referrer"
-    if request.url.path.startswith(settings.api_v1_prefix):
+    if settings.is_production:
+        response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains"
+
+    if path.startswith(settings.api_v1_prefix) and request.method in ("POST", "PUT", "PATCH", "DELETE"):
+        claims = _claims(request)
         await write_audit_event(
-            actor=request.headers.get("x-user-email"),
+            actor=claims.get("email"),
+            organization_id=claims.get("org_id"),
             action=request.method,
-            resource=request.url.path,
+            resource=path,
             status_code=response.status_code,
-            metadata={"query": str(request.url.query), "client": request.client.host if request.client else None},
+            metadata={"client": client_ip(request)},
         )
     return response
 
 
-@app.post(f"{settings.api_v1_prefix}/graphql")
-async def graphql(request: Request):
-    body = await request.json()
-    query = str(body.get("query", "")).lower()
-    async with httpx.AsyncClient() as client:
-        if "jobs" in query:
-            response = await client.get(f"{settings.matching_service_url}{settings.api_v1_prefix}/jobs")
-            return {"data": {"jobs": response.json()}}
-        if "analytics" in query:
-            response = await client.get(
-                f"{settings.analytics_service_url}{settings.api_v1_prefix}/analytics/hiring",
-                headers={key: value for key, value in request.headers.items() if key.lower() != "host"},
-            )
-            return {"data": {"analytics": response.json()}}
-    return JSONResponse(
-        {"errors": [{"message": "Supported MVP queries: jobs, analytics"}]},
-        status_code=400,
-    )
+# Added last so it is the outermost layer: rate-limit and error responses still carry CORS headers.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origin_list,
+    allow_origin_regex=settings.cors_origin_regex,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
+    expose_headers=["X-Request-ID"],
+)
 
 
-@app.websocket(f"{settings.api_v1_prefix}/ws/notifications")
-async def notification_socket(websocket: WebSocket):
-    await websocket.accept()
+@app.api_route(f"{settings.api_v1_prefix}/{{service}}{{rest:path}}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
+async def proxy(service: str, rest: str, request: Request):
+    target = SERVICES.get(service)
+    if not target:
+        return JSONResponse({"detail": "Not found"}, status_code=404)
+
+    headers = {k: v for k, v in request.headers.items() if k.lower() not in HOP_BY_HOP}
+    headers["x-request-id"] = request_id_var.get() or ""
+    headers["x-forwarded-for"] = client_ip(request)
     try:
-        await websocket.send_json({"type": "connected", "message": "Notification stream ready"})
-        while True:
-            message = await websocket.receive_text()
-            await websocket.send_json({"type": "echo", "message": message})
-    except WebSocketDisconnect:
-        return
+        upstream = await get_client().request(
+            method=request.method,
+            url=f"{target}{settings.api_v1_prefix}/{service}{rest}",
+            headers=headers,
+            content=await request.body(),
+            params=request.query_params,
+        )
+    except httpx.TimeoutException:
+        logger.warning("Upstream timeout", extra={"service": service})
+        return JSONResponse({"detail": "Upstream service timed out"}, status_code=504)
+    except httpx.HTTPError:
+        logger.exception("Upstream unavailable", extra={"service": service})
+        return JSONResponse({"detail": "Service temporarily unavailable"}, status_code=503)
 
-
-@app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
-async def gateway(path: str, request: Request):
-    root_path = path.split("/")[2] if path.startswith("api/v1/") else path.split("/")[0]
-    
-    target_service = SERVICES.get(root_path)
-    if not target_service:
-        return JSONResponse({"error": "Service not found"}, status_code=404)
-        
-    url = f"{target_service}/{path}"
-    
-    async with httpx.AsyncClient() as client:
-        try:
-            req_body = await request.body()
-            headers = dict(request.headers)
-            headers.pop("host", None)
-            response = await client.request(
-                method=request.method,
-                url=url,
-                headers=headers,
-                content=req_body,
-                params=request.query_params
-            )
-            content_type = response.headers.get("content-type", "")
-            if "application/json" in content_type:
-                return JSONResponse(content=response.json(), status_code=response.status_code)
-            return Response(
-                content=response.content,
-                status_code=response.status_code,
-                media_type=content_type or None,
-            )
-        except Exception as e:
-            return JSONResponse({"error": str(e)}, status_code=500)
+    response_headers = {k: v for k, v in upstream.headers.items() if k.lower() not in HOP_BY_HOP}
+    return Response(content=upstream.content, status_code=upstream.status_code, headers=response_headers)
