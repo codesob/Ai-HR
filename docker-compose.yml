@@ -10,8 +10,8 @@ x-backend: &backend
   environment: &backend-env
     ENVIRONMENT: ${ENVIRONMENT:-development}
     DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-aihr}:${POSTGRES_PASSWORD:-aihr-dev-password}@postgres:5432/${POSTGRES_DB:-aihr}
-    REDIS_URL: redis://redis:6379/0
-    QDRANT_URL: http://qdrant:6333
+    REDIS_URL: ${EXTERNAL_REDIS_URL:-redis://redis:6379/0}
+    QDRANT_URL: ${EXTERNAL_QDRANT_URL:-http://qdrant:6333}
     SECRET_KEY: ${SECRET_KEY:-dev-secret-change-in-production-min-32}
     AUTO_CREATE_SCHEMA: "false"
     SEED_DEMO_DATA: "false"
