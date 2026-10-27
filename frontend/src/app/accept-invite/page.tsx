@@ -18,8 +18,8 @@ function AcceptInvite() {
     setLoading(true);
     setError("");
     try {
-      const { access_token, user } = await api.acceptInvite({ token, full_name: fullName, password });
-      setSession({ token: access_token, user });
+      const { user } = await api.acceptInvite({ token, full_name: fullName, password });
+      setSession({ user });
       router.push(homeFor(user.role));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not accept invitation");
@@ -32,7 +32,7 @@ function AcceptInvite() {
 
   return (
     <form onSubmit={submit} className="card mx-auto max-w-md space-y-4">
-      <h1 className="text-xl font-semibold tracking-tight">Join your team on AI-HR</h1>
+      <h1 className="text-xl">Join your team on AI-HR</h1>
       {error && (
         <p role="alert" className="text-sm text-danger">
           {error}

@@ -37,18 +37,33 @@ export function MiniBar({ label, value }: { label: string; value: number | undef
   );
 }
 
-export function Avatar({ name }: { name: string | null | undefined }) {
-  const initials = (name ?? "?").split(/\s+/).map((p) => p[0]).slice(0, 2).join("").toUpperCase();
+// Soft avatar colors; a person keeps the same one everywhere.
+const AVATAR_TONES = [
+  "bg-brand-soft text-brand",
+  "bg-[#e9e5f8] text-[#4b3f8f]",
+  "bg-accent-soft text-warning",
+  "bg-[#fbe4d8] text-[#8a3b1a]",
+];
+
+export function Avatar({ name, size = "h-10 w-10 text-sm" }: { name: string | null | undefined; size?: string }) {
+  const n = name ?? "?";
+  const initials = n.split(/\s+/).map((p) => p[0]).slice(0, 2).join("").toUpperCase();
+  const tone = AVATAR_TONES[[...n].reduce((h, ch) => h + ch.charCodeAt(0), 0) % AVATAR_TONES.length];
   return (
-    <span aria-hidden className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-soft text-sm font-semibold text-brand-ink">
+    <span aria-hidden className={clsx("flex shrink-0 items-center justify-center rounded-full font-semibold", size, tone)}>
       {initials}
     </span>
   );
 }
 
+/** Small uppercase column label, as in "OPEN JOBS". */
+export function Label({ children, className }: { children: ReactNode; className?: string }) {
+  return <p className={clsx("text-[0.7rem] font-semibold tracking-wider text-muted uppercase", className)}>{children}</p>;
+}
+
 export function EmptyState({ icon: Icon, title, children }: { icon: LucideIcon; title: string; children?: ReactNode }) {
   return (
-    <div className="flex flex-col items-center gap-3 rounded-[var(--radius-card)] border border-dashed border-line-strong px-6 py-12 text-center">
+    <div className="flex flex-col items-center gap-3 rounded-card border border-dashed border-line-strong px-6 py-12 text-center">
       <span className="flex h-12 w-12 items-center justify-center rounded-full bg-surface-2">
         <Icon className="h-5 w-5 text-subtle" aria-hidden />
       </span>
@@ -62,7 +77,7 @@ export function Stat({ label, value, hint }: { label: string; value: ReactNode; 
   return (
     <div className="card p-5">
       <p className="text-sm text-muted">{label}</p>
-      <p className="mt-2 text-3xl font-semibold tracking-tight text-ink">{value}</p>
+      <p className="mt-2 font-display text-3xl text-ink">{value}</p>
       {hint && <p className="mt-1 text-xs text-subtle">{hint}</p>}
     </div>
   );

@@ -8,7 +8,7 @@ from shared.api.rbac import require_roles
 from shared.models.entities import User, UserRole
 from shared.models.payroll import Payslip, SalaryProfile
 from shared.schemas.payroll import PayrollPeriod, PayrollRun, PayslipOut, SalaryProfileCreate
-from app.services.calculator import calculate_net_salary
+from shared.services.hr_actions import ConflictError, calculate_net_salary, run_org_payroll
 
 router = APIRouter(prefix="/payroll", tags=["payroll"])
 
@@ -27,7 +27,7 @@ async def _org_member(db: AsyncSession, user_id: int, organization_id: int) -> U
 
 @router.put("/profile")
 async def upsert_salary_profile(
-    payload: SalaryProfileCreate, db: AsyncSession = Depends(get_db), admin: User = Depends(admin_only)
+    payload: SalaryProfileCreate, db: AsyncSession = Depends(get_db, scope="function"), admin: User = Depends(admin_only)
 ):
     await _org_member(db, payload.user_id, admin.organization_id)
     profile = (await db.execute(
@@ -49,7 +49,7 @@ async def upsert_salary_profile(
 
 @router.post("/run", response_model=PayslipOut, status_code=201)
 async def run_payroll_for_user(
-    payload: PayrollRun, db: AsyncSession = Depends(get_db), admin: User = Depends(admin_only)
+    payload: PayrollRun, db: AsyncSession = Depends(get_db, scope="function"), admin: User = Depends(admin_only)
 ):
     await _org_member(db, payload.user_id, admin.organization_id)
     profile = (await db.execute(
@@ -80,7 +80,7 @@ async def run_payroll_for_user(
 
 
 @router.get("/payslips/mine", response_model=list[PayslipOut])
-async def my_payslips(db: AsyncSession = Depends(get_db), user: User = Depends(staff)):
+async def my_payslips(db: AsyncSession = Depends(get_db, scope="function"), user: User = Depends(staff)):
     result = await db.execute(
         select(Payslip).where(Payslip.user_id == user.id).order_by(Payslip.period_start.desc())
     )
@@ -88,7 +88,7 @@ async def my_payslips(db: AsyncSession = Depends(get_db), user: User = Depends(s
 
 
 @router.get("/profiles")
-async def salary_profiles(db: AsyncSession = Depends(get_db), admin: User = Depends(admin_only)):
+async def salary_profiles(db: AsyncSession = Depends(get_db, scope="function"), admin: User = Depends(admin_only)):
     """Every active staff member with their salary profile (if any) and most recent payslip."""
     members = (await db.execute(
         select(User).where(
@@ -122,36 +122,10 @@ async def salary_profiles(db: AsyncSession = Depends(get_db), admin: User = Depe
 
 @router.post("/run-all")
 async def run_payroll_for_organization(
-    payload: PayrollPeriod, db: AsyncSession = Depends(get_db), admin: User = Depends(admin_only)
+    payload: PayrollPeriod, db: AsyncSession = Depends(get_db, scope="function"), admin: User = Depends(admin_only)
 ):
     """Issue payslips for everyone with a salary profile; people already paid for the period are skipped."""
-    profiles = (await db.execute(
-        select(SalaryProfile)
-        .join(User, User.id == SalaryProfile.user_id)
-        .where(SalaryProfile.organization_id == admin.organization_id, User.is_active)
-    )).scalars().all()
-    already_paid = set((await db.execute(
-        select(Payslip.user_id).where(
-            Payslip.organization_id == admin.organization_id,
-            Payslip.period_start == payload.period_start,
-            Payslip.period_end == payload.period_end,
-        )
-    )).scalars())
-
-    processed, total_net = 0, 0.0
-    for profile in profiles:
-        if profile.user_id in already_paid:
-            continue
-        gross, tax, net = calculate_net_salary(profile.annual_base)
-        db.add(Payslip(
-            organization_id=admin.organization_id, user_id=profile.user_id,
-            period_start=payload.period_start, period_end=payload.period_end,
-            gross_amount=gross, tax_deduction=tax, net_amount=net,
-        ))
-        processed += 1
-        total_net += net
     try:
-        await db.flush()
-    except IntegrityError:
-        raise HTTPException(status_code=409, detail="Payroll is already running for this period") from None
-    return {"processed": processed, "skipped": len(already_paid), "total_net": round(total_net, 2)}
+        return await run_org_payroll(db, admin.organization_id, payload.period_start, payload.period_end)
+    except ConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None

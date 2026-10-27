@@ -18,6 +18,7 @@ os.environ.update(
     RATE_LIMIT_REQUESTS="0",
     AUTH_RATE_LIMIT_REQUESTS="0",
     GROQ_API_KEY="",
+    AGENT_SCREEN_NEW_APPLICATIONS="false",
     NVIDIA_API_KEY="",
     SMTP_HOST="",
 )
@@ -77,7 +78,11 @@ _apps: dict[str, object] = {}
 def service_client(name: str) -> httpx.AsyncClient:
     if name not in _apps:
         _apps[name] = load_service(name)
-    return httpx.AsyncClient(transport=httpx.ASGITransport(app=_apps[name]), base_url="http://test")
+    # Like a browser: keeps cookies and sends our own frontend's Origin.
+    return httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=_apps[name]), base_url="http://test",
+        headers={"Origin": "http://localhost:3000"},
+    )
 
 
 @pytest_asyncio.fixture

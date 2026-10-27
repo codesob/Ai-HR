@@ -21,8 +21,8 @@ function SignUpToApply({ slug, onDone, onCancel }: { slug: string; onDone: () =>
     setBusy(true);
     setError("");
     try {
-      const { access_token, user } = await api.registerCandidate({ ...form, org_slug: slug });
-      setSession({ token: access_token, user });
+      const { user } = await api.registerCandidate({ ...form, org_slug: slug });
+      setSession({ user });
       onDone();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't create your profile");
@@ -53,7 +53,7 @@ function SignUpToApply({ slug, onDone, onCancel }: { slug: string; onDone: () =>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-xs text-subtle">
-          Already have one? <Link href="/login" className="text-brand hover:underline">Sign in</Link>
+          Already have one? <Link href="/login" className="text-brand-ink hover:underline">Sign in</Link>
         </p>
         <div className="flex gap-2">
           <button type="button" className="btn-ghost" onClick={onCancel}>Cancel</button>
@@ -83,7 +83,7 @@ export default function CareersPage() {
   async function apply(jobId: number) {
     setNotice("");
     try {
-      await api.apply(jobId);
+      await api.apply(jobId, new URLSearchParams(window.location.search).get("source") ?? undefined);
       setApplied((s) => new Set(s).add(jobId));
       setNotice("Application sent. Add your resume in My applications to strengthen your match.");
     } catch (err) {
@@ -100,7 +100,7 @@ export default function CareersPage() {
     <div className="mx-auto max-w-4xl space-y-10">
       <header className="space-y-3 text-center">
         <p className="eyebrow">Careers</p>
-        <h1 className="text-4xl font-semibold tracking-tight">Come build with us</h1>
+        <h1 className="text-4xl">Come build with us</h1>
         <p className="text-muted">
           {jobs ? `${jobs.length} open role${jobs.length === 1 ? "" : "s"}` : "Loading open roles…"}
           {" · "}Every application is read by a person.
@@ -124,7 +124,7 @@ export default function CareersPage() {
 
       {Object.entries(byDept).map(([dept, list]) => (
         <section key={dept} className="space-y-3">
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-subtle">{dept}</h2>
+          <h2 className="font-sans text-xs font-semibold uppercase tracking-wider text-muted">{dept}</h2>
           <ul className="space-y-3">
             {list.map((j) => (
               <li key={j.id} className="card space-y-4 p-5">

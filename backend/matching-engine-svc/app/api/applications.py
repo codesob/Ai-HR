@@ -1,8 +1,7 @@
 import asyncio
 import logging
-from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,7 +11,9 @@ from shared.api.rbac import require_roles
 from shared.db.session import AsyncSessionLocal, get_db
 from shared.models.entities import Application, ApplicationStatus, CandidateProfile, Job, User, UserRole
 from shared.schemas.common import ApplicationOut, ApplicationStatusUpdate, MatchExplanation, ParsedResume
-from shared.services.events import publish_notification
+from shared.services.candidate_emails import company_name, email_applicant, email_hiring_team, stage_message
+from shared.services.agent.triggers import screen_new_application
+from shared.services.hr_actions import NotFoundError, set_application_status
 from shared.services.matching import compute_match, rank_applications, rerank_candidates_with_nvidia
 
 logger = logging.getLogger(__name__)
@@ -83,9 +84,10 @@ async def score_unscored_applications() -> None:
 @router.post("/apply/{job_id}", response_model=ApplicationOut, status_code=201)
 async def apply_to_job(
     job_id: int,
+    background: BackgroundTasks,
     source: str = Query(default="careers_page", max_length=64),
     user: User = Depends(candidate_only),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ):
     job = (await db.execute(
         select(Job).where(Job.id == job_id, Job.organization_id == user.organization_id, Job.status == "open")
@@ -118,30 +120,26 @@ async def apply_to_job(
     except IntegrityError:
         raise HTTPException(status_code=409, detail="Already applied") from None
 
-    recruiters = (await db.execute(
-        select(User.email).where(
-            User.organization_id == user.organization_id,
-            User.role.in_([UserRole.RECRUITER, UserRole.ADMIN]),
-            User.is_active,
-        )
-    )).scalars().all()
-    for email in recruiters:
-        await publish_notification(
-            db,
-            organization_id=user.organization_id,
-            recipient=email,
-            subject="New application received",
-            body=f"{user.full_name} applied to {job.title}",
-            event_type="application.created",
-            payload={"application_id": app.id, "job_id": job.id, "candidate_id": user.id},
-        )
+    company = await company_name(db, user.organization_id)
+    subject, body = stage_message("applied", user.full_name, job.title, company)
+    await email_applicant(db, user.organization_id, user.email, subject, body, "application.received",
+                          {"application_id": app.id})
+    via = " via LinkedIn" if source == "linkedin" else ""
+    await email_hiring_team(
+        db, user.organization_id, f"New application{via}: {user.full_name} for {job.title}",
+        f"{user.full_name} applied for {job.title}{via}. Match with the job: {round((match.match_score or 0) * 100)}/100."
+        "\n\nThe HR agent reads the resume next and will tell you if anything needs your OK.",
+        "application.created", {"application_id": app.id, "job_id": job.id, "candidate_id": user.id},
+    )
     app.job, app.candidate = job, user
     await db.refresh(app, attribute_names=["created_at"])
+    # Runs after the response, once this request's transaction has committed.
+    background.add_task(screen_new_application, user.organization_id, app.id)
     return _to_out(app)
 
 
 @router.get("/mine", response_model=list[ApplicationOut])
-async def my_applications(user: User = Depends(candidate_only), db: AsyncSession = Depends(get_db)):
+async def my_applications(user: User = Depends(candidate_only), db: AsyncSession = Depends(get_db, scope="function")):
     result = await db.execute(
         select(Application)
         .where(Application.candidate_id == user.id)
@@ -154,7 +152,7 @@ async def my_applications(user: User = Depends(candidate_only), db: AsyncSession
 @router.get("", response_model=list[ApplicationOut])
 async def list_applications(
     job_id: int | None = None,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: User = Depends(hr_staff),
 ):
     q = (
@@ -172,20 +170,13 @@ async def list_applications(
 async def update_status(
     application_id: int,
     payload: ApplicationStatusUpdate,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: User = Depends(hr_staff),
 ):
-    app = (await db.execute(
-        select(Application)
-        .where(Application.id == application_id, Application.organization_id == user.organization_id)
-        .options(selectinload(Application.job), selectinload(Application.candidate))
-    )).scalar_one_or_none()
-    if not app:
-        raise HTTPException(status_code=404, detail="Application not found")
-    new_status = ApplicationStatus(payload.status)
-    app.status = new_status
-    app.hired_at = datetime.now(timezone.utc) if new_status == ApplicationStatus.HIRED else None
-    await db.flush()
+    try:
+        app = await set_application_status(db, user.organization_id, application_id, ApplicationStatus(payload.status))
+    except NotFoundError:
+        raise HTTPException(status_code=404, detail="Application not found") from None
     return _to_out(app)
 
 
@@ -202,7 +193,7 @@ async def _job_applications(db: AsyncSession, job_id: int, organization_id: int)
 
 
 @router.get("/ranked/{job_id}")
-async def ranked_candidates(job_id: int, db: AsyncSession = Depends(get_db), user: User = Depends(hr_staff)):
+async def ranked_candidates(job_id: int, db: AsyncSession = Depends(get_db, scope="function"), user: User = Depends(hr_staff)):
     _, apps = await _job_applications(db, job_id, user.organization_id)
     profiles = await _profiles_by_user(db, [a.candidate_id for a in apps])
     items = [
@@ -211,6 +202,7 @@ async def ranked_candidates(job_id: int, db: AsyncSession = Depends(get_db), use
             "candidate_id": a.candidate_id,
             "candidate_name": a.candidate.full_name if a.candidate else None,
             "status": a.status.value,
+            "source": a.source,
             "match_score": a.match_score,
             "match_explanation": a.match_explanation,
             "parsed_data": (profiles[a.candidate_id].parsed_data if a.candidate_id in profiles else None) or {},
@@ -228,7 +220,7 @@ async def ranked_candidates(job_id: int, db: AsyncSession = Depends(get_db), use
 async def reranked_candidates_nvidia(
     job_id: int,
     top_k: int = Query(default=10, ge=1, le=100),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: User = Depends(hr_staff),
 ):
     """Semantic reranking with NVIDIA Nemotron; falls back to stored order if the API is unavailable."""

@@ -29,7 +29,7 @@ async def _index_job(job: Job) -> None:
 
 
 @router.get("/public/{org_slug}", response_model=list[JobOut])
-async def public_jobs(org_slug: str, db: AsyncSession = Depends(get_db)):
+async def public_jobs(org_slug: str, db: AsyncSession = Depends(get_db, scope="function")):
     """Careers page: open roles for one organization, no login required."""
     result = await db.execute(
         select(Job)
@@ -41,7 +41,7 @@ async def public_jobs(org_slug: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("", response_model=list[JobOut])
-async def list_jobs(db: AsyncSession = Depends(get_db), user: User = Depends(require_user)):
+async def list_jobs(db: AsyncSession = Depends(get_db, scope="function"), user: User = Depends(require_user)):
     query = select(Job).where(Job.organization_id == user.organization_id)
     if not has_role(user, (UserRole.ADMIN, UserRole.RECRUITER)):
         query = query.where(Job.status == "open")
@@ -50,7 +50,7 @@ async def list_jobs(db: AsyncSession = Depends(get_db), user: User = Depends(req
 
 
 @router.post("", response_model=JobOut, status_code=201)
-async def create_job(payload: JobCreate, db: AsyncSession = Depends(get_db), user: User = Depends(hr_staff)):
+async def create_job(payload: JobCreate, db: AsyncSession = Depends(get_db, scope="function"), user: User = Depends(hr_staff)):
     job = Job(**payload.model_dump(), organization_id=user.organization_id)
     db.add(job)
     await db.flush()
@@ -74,13 +74,13 @@ async def _get_job(db: AsyncSession, job_id: int, organization_id: int) -> Job:
 
 
 @router.get("/{job_id}", response_model=JobOut)
-async def get_job(job_id: int, db: AsyncSession = Depends(get_db), user: User = Depends(require_user)):
+async def get_job(job_id: int, db: AsyncSession = Depends(get_db, scope="function"), user: User = Depends(require_user)):
     return await _get_job(db, job_id, user.organization_id)
 
 
 @router.patch("/{job_id}", response_model=JobOut)
 async def update_job(
-    job_id: int, payload: JobUpdate, db: AsyncSession = Depends(get_db), user: User = Depends(hr_staff)
+    job_id: int, payload: JobUpdate, db: AsyncSession = Depends(get_db, scope="function"), user: User = Depends(hr_staff)
 ):
     job = await _get_job(db, job_id, user.organization_id)
     for field, value in payload.model_dump(exclude_unset=True).items():

@@ -13,6 +13,7 @@ class UserOut(BaseModel):
     full_name: str
     role: str
     is_active: bool = True
+    email_verified_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 
@@ -128,6 +129,8 @@ class ParsedResume(BaseModel):
     work_experience: list[dict[str, Any]] = []
     projects: list[str] = []
     summary: str | None = None
+    # Read by the vision model from a photo or scan: names and numbers may be misread.
+    read_from_scan: bool = False
 
 
 class MatchExplanation(BaseModel):
@@ -259,5 +262,38 @@ class NotificationOut(BaseModel):
     event_type: str
     payload: dict[str, Any]
     created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str = Field(min_length=10, max_length=128)
+    password: str = Field(min_length=10, max_length=128)
+
+
+class TokenRequest(BaseModel):
+    token: str = Field(min_length=10, max_length=128)
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=10, max_length=128)
+
+
+class ProfileUpdate(BaseModel):
+    full_name: str = Field(min_length=1, max_length=255)
+
+
+class SessionOut(BaseModel):
+    id: int
+    user_agent: str
+    ip: str
+    created_at: datetime
+    last_used_at: datetime
+    current: bool = False
 
     model_config = {"from_attributes": True}

@@ -80,6 +80,8 @@ numpy==2.5.4
     #   qdrant-client
 opentelemetry-api==1.45.1
     # via fastapi
+pillow==13.0.0
+    # via -r requirements.in
 portalocker==4.4.1
     # via qdrant-client
 protobuf==7.36.2
@@ -97,6 +99,8 @@ pydantic-settings==2.16.1
 pyjwt==2.15.1
     # via -r requirements.in
 pypdf==6.21.2
+    # via -r requirements.in
+pypdfium2==5.14.0
     # via -r requirements.in
 python-dateutil==2.9.0.post0
     # via botocore

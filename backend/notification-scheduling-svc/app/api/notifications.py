@@ -16,7 +16,7 @@ hr_staff = require_roles(UserRole.ADMIN, UserRole.RECRUITER)
 
 @router.post("", response_model=NotificationOut, status_code=201)
 async def create_notification(
-    payload: NotificationCreate, db: AsyncSession = Depends(get_db), user: User = Depends(hr_staff)
+    payload: NotificationCreate, db: AsyncSession = Depends(get_db, scope="function"), user: User = Depends(hr_staff)
 ):
     return await publish_notification(
         db,
@@ -33,7 +33,7 @@ async def create_notification(
 @router.get("/mine", response_model=list[NotificationOut])
 async def my_notifications(
     limit: int = Query(default=50, ge=1, le=200),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: User = Depends(require_user),
 ):
     result = await db.execute(
@@ -49,7 +49,7 @@ async def my_notifications(
 async def list_notifications(
     recipient: str | None = None,
     limit: int = Query(default=100, ge=1, le=500),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: User = Depends(hr_staff),
 ):
     query = select(Notification).where(Notification.organization_id == user.organization_id)
@@ -61,7 +61,7 @@ async def list_notifications(
 
 @router.post("/{notification_id}/dispatch", response_model=NotificationOut)
 async def dispatch_notification(
-    notification_id: int, db: AsyncSession = Depends(get_db), user: User = Depends(hr_staff)
+    notification_id: int, db: AsyncSession = Depends(get_db, scope="function"), user: User = Depends(hr_staff)
 ):
     notification = (await db.execute(
         select(Notification).where(

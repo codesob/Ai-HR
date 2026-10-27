@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import clsx from "clsx";
 import { Check, FileUp, Search } from "lucide-react";
+import { ApplicantScreening } from "@/components/ApplicantScreening";
 import { AuthGate } from "@/components/AuthGate";
 import { PageHeader } from "@/components/PageHeader";
 import { Alert, EmptyState } from "@/components/ui";
@@ -80,19 +81,19 @@ function Candidate() {
 
   return (
     <div className="space-y-8">
-      <PageHeader title="My applications" subtitle="Add your resume once, then apply in one click" />
+      <PageHeader title="My applications" subtitle="Step 1: add your resume. Step 2: apply to a job with one click. Then follow your progress here." />
       {notice && <Alert tone={notice.tone}>{notice.text}</Alert>}
 
       <label className={clsx(
-        "flex cursor-pointer flex-col items-center gap-3 rounded-[var(--radius-card)] border-2 border-dashed border-line-strong bg-surface px-6 py-8 text-center transition hover:border-brand/50",
+        "flex cursor-pointer flex-col items-center gap-3 rounded-card border-2 border-dashed border-line-strong bg-surface px-6 py-8 text-center transition hover:border-brand/50",
         uploading && "pointer-events-none opacity-60",
       )}>
         <span className="flex h-12 w-12 items-center justify-center rounded-full bg-brand-soft">
-          <FileUp className="h-5 w-5 text-brand" aria-hidden />
+          <FileUp className="h-5 w-5 text-brand-ink" aria-hidden />
         </span>
         <span className="font-medium text-ink">{uploading ? "Reading your resume…" : parsed ? "Replace your resume" : "Upload your resume"}</span>
-        <span className="text-sm text-muted">PDF, DOCX or TXT, up to 5 MB</span>
-        <input type="file" accept=".pdf,.docx,.txt,.md" className="sr-only" disabled={uploading} onChange={upload} />
+        <span className="text-sm text-muted">PDF, Word, text, or a photo of your resume (also your LinkedIn profile PDF), up to 5 MB</span>
+        <input type="file" accept=".pdf,.docx,.txt,.md,.png,.jpg,.jpeg,.webp" className="sr-only" disabled={uploading} onChange={upload} />
       </label>
       {parsed && (
         <div className="card space-y-2 p-5">
@@ -105,9 +106,11 @@ function Candidate() {
         </div>
       )}
 
+      <ApplicantScreening />
+
       {applications.length > 0 && (
         <section className="space-y-3">
-          <h2 className="font-semibold">Your applications</h2>
+          <h2 className="text-xl">Your applications</h2>
           <ul className="space-y-3">
             {applications.map((a) => (
               <li key={a.id} className="card space-y-4 p-5">
@@ -125,7 +128,7 @@ function Candidate() {
       )}
 
       <section className="space-y-3">
-        <h2 className="font-semibold">Open roles</h2>
+        <h2 className="text-xl">Jobs you can apply to</h2>
         {jobs.length === 0 ? (
           <EmptyState icon={Search} title="No open roles right now">Check back soon.</EmptyState>
         ) : (

@@ -96,9 +96,9 @@ APPLICATIONS = [
 
 # name, email local part, role, annual base
 STAFF = [
-    ("Admin User", "admin", "admin", 150000),
-    ("Alex Recruiter", "recruiter", "recruiter", 98000),
-    ("Sam Employee", "employee", "employee", 112000),
+    ("Maya Torres", "admin", "admin", 150000),
+    ("Alex Kim", "recruiter", "recruiter", 98000),
+    ("Sam Okafor", "employee", "employee", 112000),
     ("Grace Liu", "grace", "employee", 135000),
     ("Ravi Shah", "ravi", "employee", 121000),
 ]
@@ -143,13 +143,14 @@ async def _seed_core(db, org_id: int) -> None:
     from shared.models.entities import Job, User, UserRole
 
     password = hash_password(DEMO_PASSWORD)
+    verified = datetime.now(timezone.utc)
     db.add_all([
         User(organization_id=org_id, email=f"{local}@aihr.demo", hashed_password=password,
-             full_name=name, role=UserRole(role))
+             full_name=name, role=UserRole(role), email_verified_at=verified)
         for name, local, role, _ in STAFF
     ])
     db.add(User(organization_id=org_id, email="candidate@aihr.demo", hashed_password=password,
-                full_name="Jordan Candidate", role=UserRole.CANDIDATE))
+                full_name="Jordan Candidate", role=UserRole.CANDIDATE, email_verified_at=verified))
     db.add_all([
         Job(organization_id=org_id, title=t, department=d, description=desc, requirements=req,
             required_skills=skills, min_experience_years=years, salary_min=lo, salary_max=hi, status=status)
@@ -187,7 +188,8 @@ async def _seed_showcase(db, org_id: int) -> None:
     for name, local, role, _ in STAFF:
         if f"{local}@aihr.demo" not in users:
             users[f"{local}@aihr.demo"] = User(organization_id=org_id, email=f"{local}@aihr.demo",
-                                                hashed_password=password, full_name=name, role=UserRole(role))
+                                                hashed_password=password, full_name=name, role=UserRole(role),
+                                                email_verified_at=now)
             db.add(users[f"{local}@aihr.demo"])
     jobs_by_title = {j.title: j for j in (await db.execute(select(Job).where(Job.organization_id == org_id))).scalars()}
     for t, d, desc, req, skills, years, lo, hi, status in JOBS:
@@ -199,9 +201,10 @@ async def _seed_showcase(db, org_id: int) -> None:
     jobs = [jobs_by_title[spec[0]] for spec in JOBS]
 
     candidates: dict[str, User] = {}
-    for name, local, skills, years, education, summary, certs in CANDIDATES:
+    for name, local, *_ in CANDIDATES:
         user = User(organization_id=org_id, email=f"{local}@candidates.aihr.demo", hashed_password=password,
-                    full_name=name, role=UserRole.CANDIDATE, created_at=now - timedelta(days=75))
+                    full_name=name, role=UserRole.CANDIDATE, created_at=now - timedelta(days=75),
+                    email_verified_at=now - timedelta(days=75))
         db.add(user)
         candidates[local] = user
     await db.flush()

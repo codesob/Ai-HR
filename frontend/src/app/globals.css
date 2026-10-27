@@ -5,36 +5,44 @@
   never raw palette colors, so the whole product can be re-themed here.
 */
 @theme {
-  --font-sans: var(--font-dm-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-serif), Georgia, serif;
+  --font-hand: var(--font-caveat), cursive;
 
-  --color-canvas: #f6f5f1;
-  --color-surface: #fffffe;
-  --color-surface-2: #f0efea;
-  --color-line: #e4e2da;
-  --color-line-strong: #cfccc1;
+  --color-canvas: #faf8f3;
+  --color-surface: #ffffff;
+  --color-surface-2: #f3f0e8;
+  --color-line: #e7e2d6;
+  --color-line-strong: #d3ccbc;
 
-  --color-ink: #1b2033;
-  --color-ink-soft: #2c3249;
-  --color-muted: #5b6078;
-  --color-subtle: #80859b;
+  --color-ink: #10241d;
+  --color-ink-soft: #2c3b35;
+  --color-muted: #5b6862;
+  --color-subtle: #67736d;
 
-  --color-navy: #0f1426;
-  --color-navy-2: #171d36;
+  /* Dark surfaces (payroll card, highlighted task). */
+  --color-navy: #10241d;
+  --color-navy-2: #1a3329;
 
-  --color-brand: #4f46e5;
-  --color-brand-hover: #4338ca;
-  --color-brand-soft: #eeedfd;
-  --color-brand-ink: #3730a3;
+  --color-brand: #155e47;
+  --color-brand-hover: #0f4d3a;
+  --color-brand-soft: #e1f0e8;
+  --color-brand-ink: #155e47;
 
-  --color-success: #0f7a4f;
-  --color-success-soft: #e3f4ec;
-  --color-warning: #9a5b00;
-  --color-warning-soft: #fdf1dc;
+  --color-accent: #f5c542;
+  --color-accent-hover: #ebb82c;
+  --color-accent-soft: #fdf1cc;
+
+  --color-success: #1d7a4f;
+  --color-success-soft: #e3f3ea;
+  --color-warning: #8f5b00;
+  --color-warning-soft: #fdf1cc;
   --color-danger: #b42318;
   --color-danger-soft: #fdeceb;
 
-  --radius-card: 1.25rem;
-  --shadow-card: 0 1px 2px rgb(27 32 51 / 0.04), 0 8px 24px -12px rgb(27 32 51 / 0.12);
+  --radius-card: 1rem;
+  --shadow-card: 0 1px 2px rgb(16 36 29 / 0.04);
+  --shadow-lift: 0 1px 2px rgb(16 36 29 / 0.04), 0 12px 32px -12px rgb(16 36 29 / 0.18);
 }
 
 @layer base {
@@ -55,7 +63,20 @@
   }
 
   h1,
+  h2 {
+    @apply font-display font-normal text-ink;
+    text-wrap: balance;
+    letter-spacing: -0.01em;
+  }
+
+  /* The serif defaults to old-style figures; scores and money read better level. */
+  h1,
   h2,
+  .font-display {
+    --tw-numeric-figure: lining-nums;
+    font-variant-numeric: lining-nums;
+  }
+
   h3 {
     @apply text-ink;
     text-wrap: balance;
@@ -67,22 +88,36 @@
   }
 
   ::selection {
-    background-color: var(--color-brand-soft);
-    color: var(--color-brand-ink);
+    background-color: var(--color-accent-soft);
+    color: var(--color-ink);
   }
 }
 
 @layer components {
   .card {
-    @apply rounded-[var(--radius-card)] border border-line bg-surface p-6 shadow-[var(--shadow-card)];
+    @apply rounded-card border border-line bg-surface p-6 shadow-(--shadow-card);
+  }
+
+  /* Clickable card. */
+  .card-hover {
+    @apply transition hover:border-line-strong;
   }
 
   .btn-primary {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-brand px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex items-center justify-center gap-2 rounded-full bg-brand px-5 py-2.5 text-[0.95rem] font-semibold text-white transition hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  /* Yellow; for actions on dark or green backgrounds. */
+  .btn-accent {
+    @apply inline-flex items-center justify-center gap-2 rounded-full bg-accent px-5 py-2.5 text-[0.95rem] font-semibold text-ink transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .btn-dark {
+    @apply inline-flex items-center justify-center gap-2 rounded-full bg-ink px-5 py-2.5 text-[0.95rem] font-semibold text-white transition hover:bg-ink-soft disabled:cursor-not-allowed disabled:opacity-50;
   }
 
   .btn-secondary {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-line-strong bg-surface px-4 py-2.5 text-sm font-semibold text-ink transition hover:border-brand/50 hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex items-center justify-center gap-2 rounded-full border border-line-strong bg-surface px-5 py-2.5 text-[0.95rem] font-semibold text-ink transition hover:border-ink disabled:cursor-not-allowed disabled:opacity-50;
   }
 
   .btn-ghost {
@@ -90,18 +125,27 @@
   }
 
   .input {
-    @apply w-full rounded-xl border border-line-strong bg-surface px-3.5 py-2.5 text-sm text-ink placeholder:text-subtle transition focus:border-brand focus:outline-hidden focus:ring-3 focus:ring-brand/15;
+    @apply w-full rounded-xl border border-line-strong bg-surface px-4 py-3 text-base text-ink transition placeholder:text-subtle focus:border-brand focus:ring-4 focus:ring-brand/15 focus:outline-hidden;
   }
 
   .label {
-    @apply mb-1.5 block text-sm font-medium text-ink-soft;
+    @apply mb-2 block text-sm font-semibold text-ink;
   }
 
   .badge {
-    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium;
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold;
   }
 
   .eyebrow {
-    @apply text-xs font-semibold uppercase tracking-[0.2em] text-brand;
+    @apply text-sm font-semibold text-brand;
+  }
+
+  .hint {
+    @apply text-sm text-muted;
+  }
+
+  /* Handwritten margin note. */
+  .note {
+    @apply font-hand text-xl leading-none font-bold text-brand;
   }
 }

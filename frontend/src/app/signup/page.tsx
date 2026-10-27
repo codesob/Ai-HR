@@ -22,8 +22,8 @@ export default function SignupPage() {
     setLoading(true);
     setError("");
     try {
-      const { access_token, user } = await api.signup(form);
-      setSession({ token: access_token, user });
+      const { user } = await api.signup(form);
+      setSession({ user });
       router.push("/team");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sign-up failed");
@@ -35,7 +35,7 @@ export default function SignupPage() {
   return (
     <div className="mx-auto max-w-md space-y-6 py-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Create your company workspace</h1>
+        <h1 className="text-2xl">Create your company workspace</h1>
         <p className="mt-1 text-muted">You&apos;ll be the workspace admin and can invite your team next.</p>
       </div>
       <form onSubmit={submit} className="card space-y-4">
@@ -67,7 +67,7 @@ export default function SignupPage() {
       </form>
       <p className="text-sm text-muted">
         Already have an account?{" "}
-        <Link href="/login" className="text-brand hover:underline">
+        <Link href="/login" className="text-brand-ink hover:underline">
           Sign in
         </Link>
       </p>

@@ -6,10 +6,14 @@ export interface SessionUser {
   email: string;
   full_name: string;
   role: Role;
+  email_verified_at?: string | null;
 }
 
+/**
+ * The credentials live in httpOnly cookies the page can't read. This only caches who is signed in,
+ * so the UI can render immediately; the server stays the source of truth (see SessionSync).
+ */
 interface Session {
-  token: string;
   user: SessionUser;
 }
 
@@ -20,18 +24,15 @@ export function getSession(): Session | null {
   if (typeof window === "undefined") return null;
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as Session) : null;
+    const parsed = raw ? (JSON.parse(raw) as Session) : null;
+    return parsed?.user ? { user: parsed.user } : null;
   } catch {
     return null;
   }
 }
 
-export function getToken(): string | null {
-  return getSession()?.token ?? null;
-}
-
 export function setSession(session: Session) {
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ user: session.user }));
   window.dispatchEvent(new Event(EVENT));
 }
 
@@ -48,11 +49,6 @@ export function onSessionChange(callback: () => void): () => void {
     window.removeEventListener(EVENT, callback);
     window.removeEventListener("storage", callback);
   };
-}
-
-export function getAuthHeaders(): Record<string, string> {
-  const token = getToken();
-  return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
 export function homeFor(role: Role): string {

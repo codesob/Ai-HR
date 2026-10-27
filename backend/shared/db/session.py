@@ -20,6 +20,8 @@ class Base(DeclarativeBase):
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
+    # Use as Depends(get_db, scope="function") so the commit finishes before the response is sent;
+    # otherwise a client that refetches right after a write can read the old data.
     async with AsyncSessionLocal() as session:
         try:
             yield session

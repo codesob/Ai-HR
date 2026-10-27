@@ -64,18 +64,21 @@ def seed_knowledge_base() -> None:
         PointStruct(
             id=point_id(item["id"]),
             vector=vector,
-            payload={"text": item["text"], "category": item["category"], "doc_id": item["id"]},
+            # organization_id 0 marks the sample policies; company handbooks are stored under their own id.
+            payload={"text": item["text"], "category": item["category"], "doc_id": item["id"], "organization_id": 0},
         )
         for item, vector in zip(DEFAULT_KNOWLEDGE, vectors, strict=True)
     ]
     get_qdrant().upsert(collection_name=COLLECTION_KNOWLEDGE, points=points)
 
 
-def retrieve_context(query: str, top_k: int = 3) -> list[dict]:
-    return search_similar(COLLECTION_KNOWLEDGE, query, limit=top_k)
+def retrieve_context(query: str, top_k: int = 3, organization_id: int = 0) -> list[dict]:
+    return search_similar(COLLECTION_KNOWLEDGE, query, limit=top_k, organization_id=organization_id)
 
 
-async def retrieve_context_with_reranking(query: str, top_k: int = 3, initial_k: int = 10) -> list[dict]:
+async def retrieve_context_with_reranking(
+    query: str, top_k: int = 3, initial_k: int = 10, organization_id: int = 0
+) -> list[dict]:
     """
     Retrieve documents with NVIDIA reranking for better relevance.
 
@@ -88,7 +91,7 @@ async def retrieve_context_with_reranking(query: str, top_k: int = 3, initial_k:
         Reranked context documents
     """
     # Get more candidates initially for reranking
-    candidates = await asyncio.to_thread(search_similar, COLLECTION_KNOWLEDGE, query, initial_k)
+    candidates = await asyncio.to_thread(search_similar, COLLECTION_KNOWLEDGE, query, initial_k, organization_id)
 
     if not candidates:
         return []

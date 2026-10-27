@@ -6,14 +6,15 @@ from fastapi import Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 
+from shared.api.auth import account_router, users_router
 from shared.api.auth import router as auth_router
-from shared.api.auth import users_router
 from shared.api.rate_limit import client_ip, is_rate_limited
 from shared.core.app import create_service_app
 from shared.core.config import get_settings
 from shared.core.logging import request_id_var
 from shared.core.security import decode_access_token
 from shared.services.audit import flush_pending_audit_events, write_audit_event
+from shared.services.sessions import ACCESS_COOKIE, REFRESH_COOKIE
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -23,10 +24,13 @@ SERVICES = {
     "jobs": settings.matching_service_url,
     "applications": settings.matching_service_url,
     "interviews": settings.interview_service_url,
+    "screening": settings.interview_service_url,
     "analytics": settings.analytics_service_url,
     "onboarding": settings.hr_ops_service_url,
     "leave": settings.hr_ops_service_url,
     "chat": settings.chatbot_service_url,
+    "agent": settings.chatbot_service_url,
+    "handbook": settings.chatbot_service_url,
     "payroll": settings.payroll_service_url,
     "notifications": settings.notification_service_url,
 }
@@ -54,24 +58,46 @@ async def close_client() -> None:
         await _client.aclose()
 
 
-app = create_service_app("api-gateway", [auth_router, users_router], on_shutdown=[close_client, flush_pending_audit_events])
+app = create_service_app(
+    "api-gateway", [auth_router, users_router, account_router], on_shutdown=[close_client, flush_pending_audit_events]
+)
+
+UNSAFE = ("POST", "PUT", "PATCH", "DELETE")
+# Session upkeep is frequent and harmless, so it shares the general API limit instead of the strict sign-in one.
+LENIENT_AUTH_PATHS = {f"{settings.api_v1_prefix}/auth/refresh", f"{settings.api_v1_prefix}/auth/logout"}
 
 
 def _claims(request: Request) -> dict:
     auth = request.headers.get("authorization", "")
-    if not auth.lower().startswith("bearer "):
+    token = auth[7:] if auth.lower().startswith("bearer ") else request.cookies.get(ACCESS_COOKIE)
+    if not token:
         return {}
     try:
-        return decode_access_token(auth[7:])
+        return decode_access_token(token)
     except jwt.PyJWTError:
         return {}
+
+
+def _cross_site_cookie_request(request: Request) -> bool:
+    """Cookies ride along on cross-site requests, so a cookie-authenticated write must come from our own origin."""
+    if request.method not in UNSAFE or request.headers.get("authorization"):
+        return False
+    if ACCESS_COOKIE not in request.cookies and REFRESH_COOKIE not in request.cookies:
+        return False
+    origin = request.headers.get("origin")
+    return not origin or not settings.origin_allowed(origin)
 
 
 @app.middleware("http")
 async def edge_middleware(request: Request, call_next):
     path = request.url.path
     if path.startswith(settings.api_v1_prefix) and request.method != "OPTIONS":
-        is_auth = path.startswith(f"{settings.api_v1_prefix}/auth/") and request.method == "POST"
+        if _cross_site_cookie_request(request):
+            return JSONResponse({"detail": "Request origin not allowed"}, status_code=403)
+        is_auth = (
+            path.startswith(f"{settings.api_v1_prefix}/auth/") and request.method == "POST"
+            and path not in LENIENT_AUTH_PATHS
+        )
         limited = await is_rate_limited(
             request,
             bucket="auth" if is_auth else "api",
@@ -88,7 +114,7 @@ async def edge_middleware(request: Request, call_next):
     if settings.is_production:
         response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains"
 
-    if path.startswith(settings.api_v1_prefix) and request.method in ("POST", "PUT", "PATCH", "DELETE"):
+    if path.startswith(settings.api_v1_prefix) and request.method in UNSAFE:
         claims = _claims(request)
         await write_audit_event(
             actor=claims.get("email"),

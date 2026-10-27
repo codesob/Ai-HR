@@ -73,13 +73,13 @@ function Employee({ user }: { user: SessionUser }) {
 
   return (
     <div className="space-y-8">
-      <PageHeader title="My HR" subtitle="Time off, approvals and payslips" />
+      <PageHeader title="Time off & payslips" subtitle="Ask for days off, see what was approved, and check your payslips." />
       {notice && <Alert tone={notice.tone}>{notice.text}</Alert>}
 
       {isAdmin && (
         <section className="card space-y-4">
           <div className="flex items-baseline justify-between">
-            <h2 className="font-semibold">Waiting for your approval</h2>
+            <h2 className="text-xl">Waiting for your yes or no</h2>
             <span className="text-sm text-subtle">{reviewable.length} open</span>
           </div>
           {reviewable.length === 0 ? (
@@ -108,7 +108,7 @@ function Employee({ user }: { user: SessionUser }) {
 
       <div className="grid gap-6 lg:grid-cols-[1fr_1.2fr]">
         <form onSubmit={submit} className="card space-y-4">
-          <h2 className="font-semibold">Request time off</h2>
+          <h2 className="">Request time off</h2>
           <label className="block">
             <span className="label">Type</span>
             <select className="input" value={form.leave_type} onChange={(e) => setForm({ ...form, leave_type: e.target.value })}>
@@ -135,7 +135,7 @@ function Employee({ user }: { user: SessionUser }) {
         </form>
 
         <section className="card space-y-4">
-          <h2 className="font-semibold">My time off</h2>
+          <h2 className="">My time off</h2>
           {leave.length === 0 ? (
             <EmptyState icon={CalendarCheck} title="No requests yet">Requests you send appear here with their status.</EmptyState>
           ) : (
@@ -155,7 +155,7 @@ function Employee({ user }: { user: SessionUser }) {
       </div>
 
       <section className="card space-y-4">
-        <h2 className="font-semibold">Payslips</h2>
+        <h2 className="">Payslips</h2>
         {payslips === null ? (
           <div className="h-16 animate-pulse rounded-xl bg-surface-2/60" />
         ) : payslips.length === 0 ? (

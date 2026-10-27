@@ -7,6 +7,8 @@ from shared.api.rbac import require_roles
 from shared.models.entities import User, UserRole
 from shared.models.leave import LeaveRequest, LeaveStatus
 from shared.schemas.leave import BurnoutRiskOut, LeaveRequestCreate, LeaveRequestOut, LeaveReview
+from shared.services.hr_actions import NotFoundError
+from shared.services.hr_actions import review_leave as review
 from app.services.burnout import predict_burnout
 
 router = APIRouter(prefix="/leave", tags=["leave"])
@@ -17,7 +19,7 @@ admin_only = require_roles(UserRole.ADMIN)
 
 @router.post("", response_model=LeaveRequestOut, status_code=201)
 async def create_leave_request(
-    payload: LeaveRequestCreate, db: AsyncSession = Depends(get_db), user: User = Depends(staff)
+    payload: LeaveRequestCreate, db: AsyncSession = Depends(get_db, scope="function"), user: User = Depends(staff)
 ):
     leave = LeaveRequest(
         organization_id=user.organization_id,
@@ -34,7 +36,7 @@ async def create_leave_request(
 
 
 @router.get("/mine", response_model=list[LeaveRequestOut])
-async def my_leave(db: AsyncSession = Depends(get_db), user: User = Depends(staff)):
+async def my_leave(db: AsyncSession = Depends(get_db, scope="function"), user: User = Depends(staff)):
     result = await db.execute(
         select(LeaveRequest).where(LeaveRequest.user_id == user.id).order_by(LeaveRequest.start_date.desc())
     )
@@ -43,7 +45,7 @@ async def my_leave(db: AsyncSession = Depends(get_db), user: User = Depends(staf
 
 @router.get("", response_model=list[LeaveRequestOut])
 async def list_leave(
-    status: LeaveStatus | None = None, db: AsyncSession = Depends(get_db), user: User = Depends(admin_only)
+    status: LeaveStatus | None = None, db: AsyncSession = Depends(get_db, scope="function"), user: User = Depends(admin_only)
 ):
     query = select(LeaveRequest).where(LeaveRequest.organization_id == user.organization_id)
     if status:
@@ -54,21 +56,16 @@ async def list_leave(
 
 @router.post("/{leave_id}/review", response_model=LeaveRequestOut)
 async def review_leave(
-    leave_id: int, payload: LeaveReview, db: AsyncSession = Depends(get_db), user: User = Depends(admin_only)
+    leave_id: int, payload: LeaveReview, db: AsyncSession = Depends(get_db, scope="function"), user: User = Depends(admin_only)
 ):
-    leave = (await db.execute(
-        select(LeaveRequest).where(LeaveRequest.id == leave_id, LeaveRequest.organization_id == user.organization_id)
-    )).scalar_one_or_none()
-    if not leave:
-        raise HTTPException(status_code=404, detail="Leave request not found")
-    if leave.user_id == user.id:
-        raise HTTPException(status_code=403, detail="You cannot approve your own leave")
-    leave.status = payload.status
-    leave.reviewed_by_id = user.id
-    await db.flush()
-    return leave
+    try:
+        return await review(db, user.organization_id, leave_id, payload.status, user.id)
+    except NotFoundError:
+        raise HTTPException(status_code=404, detail="Leave request not found") from None
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from None
 
 
 @router.get("/burnout-risk", response_model=BurnoutRiskOut)
-async def get_burnout_risk(db: AsyncSession = Depends(get_db), user: User = Depends(staff)):
+async def get_burnout_risk(db: AsyncSession = Depends(get_db, scope="function"), user: User = Depends(staff)):
     return await predict_burnout(user.id, db)

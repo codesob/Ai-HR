@@ -46,3 +46,18 @@ async def store_file(data: bytes, key: str, content_type: str | None = None) -> 
     destination.parent.mkdir(parents=True, exist_ok=True)
     await asyncio.to_thread(destination.write_bytes, data)
     return str(destination)
+
+
+async def read_file(ref: str) -> bytes:
+    """Bytes of a file saved by store_file, given the reference it returned."""
+    settings = get_settings()
+    if ref.startswith("s3://"):
+        bucket, _, key = ref[5:].partition("/")
+        _validate_key(key)
+        obj = await asyncio.to_thread(_s3_client().get_object, Bucket=bucket, Key=key)
+        return await asyncio.to_thread(obj["Body"].read)
+    root = Path(settings.upload_dir).resolve()
+    path = Path(ref).resolve()
+    if not path.is_relative_to(root):
+        raise ValueError("File is outside the upload directory")
+    return await asyncio.to_thread(path.read_bytes)

@@ -16,6 +16,9 @@ redis
 qdrant-client
 numpy
 pypdf
+# Renders scanned PDF pages to images for the vision model.
+pypdfium2
+pillow
 python-docx
 httpx
 aiofiles

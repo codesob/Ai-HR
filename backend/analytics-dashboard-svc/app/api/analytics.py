@@ -40,12 +40,12 @@ async def _workforce(db: AsyncSession, organization_id: int) -> dict:
 
 
 @router.get("/hiring", response_model=AnalyticsSummary)
-async def hiring_analytics(db: AsyncSession = Depends(get_db), user: User = Depends(hr_staff)):
+async def hiring_analytics(db: AsyncSession = Depends(get_db, scope="function"), user: User = Depends(hr_staff)):
     return await get_hiring_analytics(db, user.organization_id)
 
 
 @router.get("/ai/dashboard")
-async def ai_insights_dashboard(db: AsyncSession = Depends(get_db), user: User = Depends(hr_staff)):
+async def ai_insights_dashboard(db: AsyncSession = Depends(get_db, scope="function"), user: User = Depends(hr_staff)):
     m = await get_org_metrics(db, user.organization_id)
     w = await _workforce(db, user.organization_id)
     hiring_metrics = {
@@ -63,7 +63,7 @@ async def ai_insights_dashboard(db: AsyncSession = Depends(get_db), user: User =
 
 
 @router.get("/ai/hiring-dashboard")
-async def hiring_dashboard(db: AsyncSession = Depends(get_db), user: User = Depends(hr_staff)):
+async def hiring_dashboard(db: AsyncSession = Depends(get_db, scope="function"), user: User = Depends(hr_staff)):
     m = await get_org_metrics(db, user.organization_id)
     return await get_hiring_dashboard(
         total_applications=m["total_applications"],
@@ -75,7 +75,7 @@ async def hiring_dashboard(db: AsyncSession = Depends(get_db), user: User = Depe
 
 
 @router.get("/ai/employee-dashboard")
-async def employee_dashboard(db: AsyncSession = Depends(get_db), user: User = Depends(hr_staff)):
+async def employee_dashboard(db: AsyncSession = Depends(get_db, scope="function"), user: User = Depends(hr_staff)):
     m = await get_org_metrics(db, user.organization_id)
     w = await _workforce(db, user.organization_id)
     return await get_employee_dashboard(
@@ -90,7 +90,7 @@ async def employee_dashboard(db: AsyncSession = Depends(get_db), user: User = De
 @router.get("/ai/hiring-forecast")
 async def hiring_forecast(
     planned_growth_percent: float = Query(default=10.0, ge=0, le=500),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: User = Depends(hr_staff),
 ):
     m = await get_org_metrics(db, user.organization_id)

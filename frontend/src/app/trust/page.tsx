@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 export const metadata: Metadata = {
-  title: "Trust & AI · AI-HR",
+  title: "How scoring works · AI-HR",
   description: "How AI-HR scores candidates, who makes decisions, and how your data is handled.",
 };
 
@@ -34,7 +34,7 @@ const sections: { title: string; body: React.ReactNode }[] = [
     ),
   },
   {
-    title: "When AI is unavailable, we say so",
+    title: "When a model is unavailable, we say so",
     body: (
       <p>
         If the language model or reranker can&apos;t be reached, AI-HR falls back to rule-based scoring and keeps the
@@ -54,7 +54,7 @@ const sections: { title: string; body: React.ReactNode }[] = [
     ),
   },
   {
-    title: "Third-party AI providers",
+    title: "Outside providers",
     body: (
       <>
         <p>
@@ -75,22 +75,21 @@ export default function TrustPage() {
   return (
     <article className="mx-auto max-w-3xl space-y-10 pb-12">
       <header className="space-y-3">
-        <p className="text-sm font-semibold uppercase tracking-[0.28em] text-brand">Trust & AI</p>
-        <h1 className="text-4xl font-semibold tracking-tight text-ink">AI you can explain to anyone</h1>
+                <h1 className="text-4xl text-ink">How scoring works</h1>
         <p className="text-lg text-muted">
-          Hiring AI is increasingly regulated, and candidates deserve to know how they&apos;re assessed. Here&apos;s
-          exactly how AI-HR works.
+          Candidates deserve to know how they&apos;re assessed, and you should be able to explain every decision.
+          Here&apos;s exactly what the score is and isn&apos;t.
         </p>
       </header>
       {sections.map((s) => (
         <section key={s.title} className="space-y-3 text-ink-soft">
-          <h2 className="text-xl font-semibold text-ink">{s.title}</h2>
+          <h2 className="text-xl text-ink">{s.title}</h2>
           {s.body}
         </section>
       ))}
       <p className="text-sm text-subtle">
         Questions about a specific deployment&apos;s data handling? Contact the company that invited you, or{" "}
-        <Link href="/signup" className="text-brand hover:underline">start your own workspace</Link>.
+        <Link href="/signup" className="text-brand-ink hover:underline">start your own workspace</Link>.
       </p>
     </article>
   );

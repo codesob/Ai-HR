@@ -5,6 +5,8 @@ import { useCallback, useEffect, useState } from "react";
 import { Check, Copy } from "lucide-react";
 import { ActivityLog } from "@/components/ActivityLog";
 import { AuthGate } from "@/components/AuthGate";
+import { HandbookPanel } from "@/components/HandbookPanel";
+import { OnboardingPanel } from "@/components/OnboardingPanel";
 import { PayrollPanel } from "@/components/PayrollPanel";
 import { PageHeader } from "@/components/PageHeader";
 import { Alert, Avatar } from "@/components/ui";
@@ -13,7 +15,7 @@ import type { SessionUser } from "@/lib/auth";
 
 const ROLES = ["recruiter", "employee", "admin"] as const;
 const ROLE_ORDER = ["admin", "recruiter", "employee"];
-const ROLE_LABELS: Record<string, string> = { admin: "Admin", recruiter: "Recruiter", employee: "Employee", candidate: "Candidate" };
+const ROLE_LABELS: Record<string, string> = { admin: "HR manager", recruiter: "Recruiter", employee: "Employee", candidate: "Job seeker" };
 
 function Team({ me }: { me: SessionUser }) {
   const [org, setOrg] = useState<Organization | null>(null);
@@ -73,14 +75,14 @@ function Team({ me }: { me: SessionUser }) {
 
   return (
     <div className="space-y-8">
-      <PageHeader title={org?.name ?? "Team"} subtitle="Your team, your careers page and payroll" />
+      <PageHeader title={org?.name ?? "Team"} subtitle="Invite people, share your job page, and pay your team." />
       {error && <Alert>{error}</Alert>}
 
       {careersUrl && (
         <div className="card flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
-            <h2 className="font-semibold">Your public careers page</h2>
-            <a href={careersUrl} target="_blank" rel="noreferrer" className="mt-1 block truncate text-sm text-brand hover:underline">
+            <h2 className="text-xl">Your job page</h2>
+            <a href={careersUrl} target="_blank" rel="noreferrer" className="mt-1 block truncate text-sm text-brand-ink hover:underline">
               {careersUrl}
             </a>
           </div>
@@ -92,7 +94,7 @@ function Team({ me }: { me: SessionUser }) {
 
       <div className="grid gap-6 lg:grid-cols-[1fr_1.4fr]">
         <form onSubmit={invite} className="card h-fit space-y-4">
-          <h2 className="font-semibold">Invite a teammate</h2>
+          <h2 className="text-xl">Invite someone to your team</h2>
           <label className="block">
             <span className="label">Work email</span>
             <input className="input" type="email" placeholder="name@company.com" required value={email}
@@ -115,7 +117,7 @@ function Team({ me }: { me: SessionUser }) {
 
         <div className="card">
           <div className="mb-2 flex items-baseline justify-between">
-            <h2 className="font-semibold">Team</h2>
+            <h2 className="text-xl">Team</h2>
             <span className="text-sm text-subtle">{staff.length} people</span>
           </div>
           <ul className="divide-y divide-line">
@@ -142,13 +144,15 @@ function Team({ me }: { me: SessionUser }) {
           {applicants > 0 && (
             <p className="mt-3 border-t border-line pt-3 text-sm text-muted">
               Plus {applicants} candidate account{applicants === 1 ? "" : "s"} from your careers page.{" "}
-              <Link href="/recruiter" className="text-brand hover:underline">See them in Recruiting</Link>
+              <Link href="/recruiter" className="text-brand-ink hover:underline">See them in Recruiting</Link>
             </p>
           )}
         </div>
       </div>
 
+      <OnboardingPanel />
       <PayrollPanel />
+      <HandbookPanel />
       <ActivityLog />
     </div>
   );

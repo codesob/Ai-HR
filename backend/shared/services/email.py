@@ -38,3 +38,13 @@ async def send_email(to: str, subject: str, body: str) -> bool:
     except Exception:
         logger.exception("Email delivery failed", extra={"to_domain": to.rsplit("@", 1)[-1]})
         return False
+
+
+async def send_account_email(to: str, subject: str, body: str, link: str) -> None:
+    """Password-reset / verification mail. Without SMTP outside production the link is logged so it can be used."""
+    if await send_email(to, subject, f"{body}\n\n{link}\n"):
+        return
+    if get_settings().is_production:
+        logger.error("Account email not delivered; configure SMTP", extra={"to_domain": to.rsplit("@", 1)[-1]})
+    else:
+        logger.warning("Email not configured. %s for %s: %s", subject, to, link)

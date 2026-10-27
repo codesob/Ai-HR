@@ -13,6 +13,10 @@ x-backend: &backend
     REDIS_URL: ${EXTERNAL_REDIS_URL:-redis://redis:6379/0}
     QDRANT_URL: ${EXTERNAL_QDRANT_URL:-http://qdrant:6333}
     SECRET_KEY: ${SECRET_KEY:-dev-secret-change-in-production-min-32}
+    # Defaults deliver every email to the local Mailpit inbox (http://localhost:8025); set SMTP_* for real mail.
+    SMTP_HOST: ${SMTP_HOST:-mailpit}
+    SMTP_PORT: ${SMTP_PORT:-1025}
+    SMTP_USE_TLS: ${SMTP_USE_TLS:-false}
     AUTO_CREATE_SCHEMA: "false"
     SEED_DEMO_DATA: "false"
   depends_on: &backend-deps
@@ -56,6 +60,13 @@ services:
     restart: unless-stopped
     volumes:
       - qdrant_data:/qdrant/storage
+
+  # Development inbox: catches all outgoing email. Not needed once SMTP_HOST points at a real provider.
+  mailpit:
+    image: axllent/mailpit:v1.21.8
+    restart: unless-stopped
+    ports:
+      - "8025:8025"
 
   migrate:
     build:
