@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import smtplib
+import ssl
 from email.message import EmailMessage
 
 from shared.core.config import get_settings
@@ -21,7 +22,7 @@ def _send_sync(to: str, subject: str, body: str) -> None:
     msg.set_content(body)
     with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=15) as smtp:
         if settings.smtp_use_tls:
-            smtp.starttls()
+            smtp.starttls(context=ssl.create_default_context())
         if settings.smtp_username:
             smtp.login(settings.smtp_username, settings.smtp_password or "")
         smtp.send_message(msg)

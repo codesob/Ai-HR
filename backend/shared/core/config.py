@@ -45,7 +45,8 @@ class Settings(BaseSettings):
     groq_model: str = "llama-3.3-70b-versatile"
     nvidia_api_key: str | None = None
     nvidia_reranker_model: str = "nvidia/llama-nemotron-rerank-vl-1b-v2"
-    nvidia_api_endpoint: str = "https://integrate.api.nvidia.com/v1"
+    # Base for NVIDIA's hosted retrieval API ({base}/{model}/reranking), or a full self-hosted NIM .../v1/ranking URL.
+    nvidia_api_endpoint: str = "https://ai.api.nvidia.com/v1/retrieval"
 
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
     # Allow LAN origins in development only; never in production.

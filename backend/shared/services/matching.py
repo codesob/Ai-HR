@@ -119,7 +119,8 @@ async def rerank_candidates_with_nvidia(
         
         result.append({
             **original,
-            "rerank_score": reranked_item.get("score", 0.0),
+            "rerank_score": reranked_item.get("score"),
+            "reranked": reranked_item.get("reranked", False),
             "rerank_position": idx + 1,
             "original_score": reranked_item.get("original_score", 0.0),
         })

@@ -278,7 +278,7 @@ def calculate_hiring_efficiency(
     # Normalize metrics (all 0-10)
     interview_rate = min(10, (interviews / max(1, applications)) * 20)  # Goal: >50%
     hire_rate = min(10, (hires / max(1, interviews)) * 10)  # Goal: >33%
-    speed = min(10, 30 / time_to_hire)  # Goal: 30 days
+    speed = min(10, 30 / time_to_hire) if time_to_hire > 0 else 0  # Goal: 30 days
     
     # Weighted average
     efficiency = (interview_rate * 0.3) + (hire_rate * 0.4) + (speed * 0.3)

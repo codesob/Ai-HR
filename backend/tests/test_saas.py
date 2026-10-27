@@ -45,6 +45,36 @@ async def test_signup_creates_org_admin_and_login_works(clients):
     assert dup.status_code == 409
 
 
+async def test_signup_and_login_with_password_over_72_bytes(clients):
+    gw = clients["api-gateway"]
+    password = "é" * 50 + "long-pass"  # 109 UTF-8 bytes, beyond bcrypt's 72-byte limit
+    r = await gw.post(f"{API}/auth/signup", json={
+        "company_name": "Longpass", "full_name": "Owner", "email": "lp@acme.io", "password": password,
+    })
+    assert r.status_code == 201, r.text
+    ok = await gw.post(f"{API}/auth/login", json={"email": "lp@acme.io", "password": password})
+    assert ok.status_code == 200, ok.text
+
+
+async def test_store_file_rejects_unsafe_keys():
+    from shared.services.storage import store_file
+
+    for key in ("../escape.txt", "org-1/../../escape.txt", "/abs.txt", "org-1//x.txt", ""):
+        with pytest.raises(ValueError):
+            await store_file(b"x", key)
+    assert (await store_file(b"x", "org-1/resumes/1_abc.txt")).endswith("1_abc.txt")
+
+
+async def test_reranker_fallback_keeps_order_without_scores_or_mutation():
+    from shared.services.nvidia_reranker import NvidiaReranker
+
+    docs = [{"text": "a", "id": 1}, {"text": "b", "id": 2}]
+    out = await NvidiaReranker().rerank("q", docs, top_k=1)
+    assert out == [{"text": "a", "id": 1, "score": None, "rank": 1, "reranked": False}]
+    assert docs == [{"text": "a", "id": 1}, {"text": "b", "id": 2}]
+    assert await NvidiaReranker().rerank("q", []) == []
+
+
 async def test_tampered_or_missing_token_rejected(clients):
     gw, me = clients["api-gateway"], clients["matching-engine-svc"]
     token = (await signup(gw, "Acme", "a@acme.io"))["access_token"]

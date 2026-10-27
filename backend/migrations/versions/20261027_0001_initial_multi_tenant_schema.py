@@ -329,3 +329,7 @@ def downgrade() -> None:
 
     op.drop_table('organizations')
     # ### end Alembic commands ###
+    # PostgreSQL keeps enum types after their tables are dropped; remove them so upgrade() can recreate them.
+    bind = op.get_bind()
+    for enum_name in ('userrole', 'applicationstatus', 'leavetype', 'leavestatus'):
+        sa.Enum(name=enum_name).drop(bind, checkfirst=True)

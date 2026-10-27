@@ -12,16 +12,20 @@ ALGORITHM = "HS256"
 TOKEN_ISSUER = "aihr"
 
 
+def _bcrypt_input(password: str) -> bytes:
+    # bcrypt only uses the first 72 bytes; reject nothing, but truncate explicitly so bcrypt>=5 doesn't raise.
+    return password.encode("utf-8")[:72]
+
+
 def verify_password(plain: str, hashed: str) -> bool:
     try:
-        return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
+        return bcrypt.checkpw(_bcrypt_input(plain), hashed.encode("utf-8"))
     except ValueError:
         return False
 
 
 def hash_password(password: str) -> str:
-    # bcrypt only uses the first 72 bytes; reject nothing, but truncate explicitly so bcrypt>=5 doesn't raise.
-    return bcrypt.hashpw(password.encode("utf-8")[:72], bcrypt.gensalt()).decode("utf-8")
+    return bcrypt.hashpw(_bcrypt_input(password), bcrypt.gensalt()).decode("utf-8")
 
 
 def create_access_token(subject: str, extra: dict[str, Any] | None = None) -> str:

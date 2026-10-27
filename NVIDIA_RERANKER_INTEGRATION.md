@@ -8,9 +8,9 @@ Successfully integrated **NVIDIA's Llama Nemotron Rerank VL 1B V2** model into t
 
 ### 1. **Environment Configuration** (`.env`)
 ```env
-NVIDIA_API_KEY=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
+NVIDIA_API_KEY=<your-nvidia-api-key>
 NVIDIA_RERANKER_MODEL=nvidia/llama-nemotron-rerank-vl-1b-v2
-NVIDIA_API_ENDPOINT=https://integrate.api.nvidia.com/v1
+NVIDIA_API_ENDPOINT=https://ai.api.nvidia.com/v1/retrieval
 ```
 
 ### 2. **Settings Configuration** (`backend/shared/core/config.py`)
@@ -174,7 +174,7 @@ Already in requirements.txt:
 
 ## 🔐 Security
 
-- API key stored securely in `.env`
+- API key is read from the `NVIDIA_API_KEY` environment variable (e.g. a local, git-ignored `.env`); `.env` is plain text, so use a secrets manager in production and never commit real keys
 - HTTPS-only API calls to NVIDIA
 - No data logging of sensitive content
 - Graceful fallback without external dependencies

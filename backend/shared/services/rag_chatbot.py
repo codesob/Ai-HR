@@ -133,18 +133,28 @@ def generate_reply(query: str, contexts: list[dict]) -> tuple[str, list[str]]:
     return reply, sources
 
 
-async def generate_ai_reply(query: str, contexts: list[dict]) -> tuple[str, list[str]]:
+def _format_history(history: list[dict] | None) -> str:
+    if not history:
+        return ""
+    turns = "\n".join(f"{m['role'].capitalize()}: {m['content']}" for m in history)
+    return f"Conversation so far:\n{turns}\n\n"
+
+
+async def generate_ai_reply(
+    query: str, contexts: list[dict], history: list[dict] | None = None
+) -> tuple[str, list[str]]:
     """Generate AI-powered HR chatbot response using LLM."""
     sources = [c["payload"].get("text", "")[:120] + "..." for c in contexts if c.get("payload")]
-    
+    conversation = _format_history(history)
+
     if not contexts:
         llm = await get_llm()
         try:
-            system = """You are an AI HR assistant. Provide helpful, professional responses about HR policies, 
+            system = """You are an AI HR assistant. Provide helpful, professional responses about HR policies,
 benefits, and employment practices. Always suggest contacting HR for complex matters."""
-            
+
             response = await llm.generate(
-                f"HR Question: {query}",
+                f"{conversation}HR Question: {query}",
                 system=system,
                 max_tokens=200,
                 temperature=0.7
@@ -172,7 +182,7 @@ employee questions accurately and professionally. Keep responses concise and act
 Policy Context:
 {context_text}
 
-Employee Question: {query}
+{conversation}Employee Question: {query}
 
 Provide a clear, helpful answer based on the policies above. If information isn't complete, suggest next steps.
 """
@@ -184,9 +194,24 @@ Provide a clear, helpful answer based on the policies above. If information isn'
         return generate_reply(query, contexts)
 
 
+# Per-process session memory (the chatbot service runs a single worker); bounded to cap memory use.
+_sessions: dict[str, list[dict]] = {}
+_MAX_SESSIONS = 1000
+_MAX_HISTORY_MESSAGES = 20
+
+
+def _remember(sid: str, message: str, reply: str) -> None:
+    history = _sessions.pop(sid, [])
+    history.extend([{"role": "user", "content": message}, {"role": "assistant", "content": reply}])
+    _sessions[sid] = history[-_MAX_HISTORY_MESSAGES:]
+    while len(_sessions) > _MAX_SESSIONS:
+        del _sessions[next(iter(_sessions))]
+
+
 async def chat(message: str, session_id: str | None = None) -> tuple[str, list[str], str]:
     sid = session_id or str(uuid.uuid4())
     settings = get_settings()
+    history = list(_sessions.get(sid, []))
     try:
         if settings.nvidia_api_key:
             contexts = await retrieve_context_with_reranking(message, top_k=3)
@@ -196,7 +221,8 @@ async def chat(message: str, session_id: str | None = None) -> tuple[str, list[s
         logger.exception("Knowledge retrieval failed")
         contexts = []
     if settings.groq_api_key:
-        reply, sources = await generate_ai_reply(message, contexts)
+        reply, sources = await generate_ai_reply(message, contexts, history)
     else:
         reply, sources = generate_reply(message, contexts)
+    _remember(sid, message, reply)
     return reply, sources, sid

@@ -31,48 +31,26 @@ class NvidiaReranker:
             )
         return self.client
 
-    async def _post_with_fallback(self, client: httpx.AsyncClient, payload: dict[str, Any]) -> dict[str, Any]:
-        """Try multiple NVIDIA rerank endpoint paths until one succeeds."""
+    def _ranking_url(self) -> str:
+        """Hosted API: {base}/{model}/reranking. A full self-hosted NIM ranking URL is used as-is."""
         base = self.endpoint.rstrip("/")
-        candidates = [
-            f"{base}/rankings",
-            f"{base}/ranking",
-            f"{base}/rank",
-        ]
-        if not base.endswith("/v1"):
-            candidates.extend([
-                f"{base}/v1/rankings",
-                f"{base}/v1/ranking",
-                f"{base}/v1/rank",
-            ])
+        if base.endswith(("/reranking", "/ranking")):
+            return base
+        return f"{base}/{self.model}/reranking"
 
-        last_error: Exception | None = None
-        for url in candidates:
-            try:
-                response = await client.post(url, json=payload)
-                if response.status_code == 404:
-                    logger.debug(f"NVIDIA reranker endpoint {url} returned 404. Trying next candidate.")
-                    continue
-                response.raise_for_status()
-                logger.debug(f"NVIDIA reranker using endpoint: {url}")
-                return response.json()
-            except httpx.HTTPStatusError as e:
-                last_error = e
-                if e.response.status_code == 404:
-                    logger.debug(f"NVIDIA reranker endpoint {url} returned 404. Trying next candidate.")
-                    continue
-                raise
-            except Exception as e:
-                last_error = e
-                logger.debug(f"NVIDIA reranker endpoint {url} failed with {type(e).__name__}: {e}. Trying next candidate.")
-                continue
-
-        if last_error:
-            raise RuntimeError(
-                f"NVIDIA reranker endpoint not found. Tried: {', '.join(candidates)}. "
-                f"Last error: {last_error}"
-            )
-        raise RuntimeError(f"NVIDIA reranker endpoint not found. Tried: {', '.join(candidates)}")
+    async def _post_rankings(self, client: httpx.AsyncClient, payload: dict[str, Any]) -> list[dict[str, Any]]:
+        """POST to the ranking endpoint and return a validated `rankings` list; raises on any failure."""
+        response = await client.post(self._ranking_url(), json=payload)
+        response.raise_for_status()
+        rankings = response.json().get("rankings")
+        if not isinstance(rankings, list) or not rankings:
+            raise ValueError("NVIDIA reranker returned no rankings")
+        n = len(payload["passages"])
+        for item in rankings:
+            idx = item.get("index") if isinstance(item, dict) else None
+            if not isinstance(idx, int) or not 0 <= idx < n or not isinstance(item.get("logit"), (int, float)):
+                raise ValueError("NVIDIA reranker returned a malformed ranking entry")
+        return rankings
 
     async def close(self):
         """Close the HTTP client."""
@@ -97,15 +75,16 @@ class NvidiaReranker:
         Returns:
             List of reranked documents with scores, sorted by relevance
         """
+        if not documents:
+            return []
+
         if not self.api_key:
             logger.warning("NVIDIA API key not configured. Skipping reranking.")
-            # Return documents as-is with default scores
             return self._format_documents(documents, top_k)
 
         try:
             client = await self._get_client()
 
-            # Prepare documents for API
             doc_texts = [
                 d if isinstance(d, str) else d.get("text", str(d))
                 for d in documents
@@ -113,36 +92,24 @@ class NvidiaReranker:
 
             payload = {
                 "model": self.model,
-                "query": query,
-                "documents": doc_texts,
-                "top_k": top_k or len(documents),
+                "query": {"text": query},
+                "passages": [{"text": t} for t in doc_texts],
+                "truncate": "END",
             }
 
-            result = await self._post_with_fallback(client, payload)
+            rankings = await self._post_rankings(client, payload)
+            rankings = sorted(rankings, key=lambda r: r["logit"], reverse=True)
 
-            # Parse reranked results
             reranked = []
-            for item in result.get("results", []):
-                idx = item.get("index", 0)
-                score = item.get("score", 0.0)
-
-                doc = documents[idx]
-                if isinstance(doc, str):
-                    reranked.append({
-                        "text": doc,
-                        "score": score,
-                        "rank": len(reranked) + 1,
-                    })
-                else:
-                    doc["score"] = score
-                    doc["rank"] = len(reranked) + 1
-                    reranked.append(doc)
+            for item in rankings:
+                doc = documents[item["index"]]
+                base = {"text": doc} if isinstance(doc, str) else dict(doc)
+                reranked.append({**base, "score": item["logit"], "rank": len(reranked) + 1, "reranked": True})
 
             return reranked[:top_k] if top_k else reranked
 
         except Exception as e:
-            logger.error(f"Error reranking documents: {e}")
-            # Fallback: return documents as-is with default scores
+            logger.error("Error reranking documents: %s", type(e).__name__)
             return self._format_documents(documents, top_k)
 
     def _format_documents(
@@ -150,19 +117,11 @@ class NvidiaReranker:
         documents: list[str | dict[str, Any]],
         top_k: int | None = None,
     ) -> list[dict[str, Any]]:
-        """Format documents with default scores for fallback."""
+        """Fallback: keep the input order without inventing relevance scores."""
         formatted = []
         for idx, doc in enumerate(documents):
-            if isinstance(doc, str):
-                formatted.append({
-                    "text": doc,
-                    "score": 1.0 - (idx * 0.05),  # Descending scores
-                    "rank": idx + 1,
-                })
-            else:
-                doc["score"] = 1.0 - (idx * 0.05)
-                doc["rank"] = idx + 1
-                formatted.append(doc)
+            base = {"text": doc} if isinstance(doc, str) else dict(doc)
+            formatted.append({**base, "score": None, "rank": idx + 1, "reranked": False})
 
         return formatted[:top_k] if top_k else formatted
 

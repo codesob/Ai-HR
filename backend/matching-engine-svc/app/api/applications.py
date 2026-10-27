@@ -230,8 +230,11 @@ async def reranked_candidates_nvidia(
         {
             **c,
             "rank_position": idx + 1,
-            "rerank_score": c.get("rerank_score", 0.0),
-            "improvement": round((c.get("rerank_score") or 0.0) - (c.get("original_score") or 0.0), 3),
+            "rerank_score": c.get("rerank_score"),
+            "improvement": (
+                round(c["rerank_score"] - (c.get("original_score") or 0.0), 3)
+                if c.get("rerank_score") is not None else None
+            ),
         }
         for idx, c in enumerate(reranked)
     ]

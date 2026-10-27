@@ -24,7 +24,11 @@ class JsonFormatter(logging.Formatter):
         }
         if rid := request_id_var.get():
             entry["request_id"] = rid
-        entry.update({k: v for k, v in record.__dict__.items() if k not in _RESERVED})
+        for k, v in record.__dict__.items():
+            if k in _RESERVED:
+                continue
+            # Extras must not clobber base keys such as "service"; keep them under a prefixed name instead.
+            entry[f"extra_{k}" if k in entry and entry[k] != v else k] = v
         if record.exc_info:
             entry["exc"] = self.formatException(record.exc_info)
         return json.dumps(entry, default=str)

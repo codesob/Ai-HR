@@ -9,6 +9,10 @@ from shared.core.config import get_settings
 logger = logging.getLogger(__name__)
 
 
+class LLMUnavailableError(RuntimeError):
+    """The LLM is not configured or generation failed; callers choose their own fallback."""
+
+
 class AILLMService:
     """AI LLM service using free APIs (Groq, Hugging Face, etc)."""
 
@@ -48,10 +52,12 @@ class AILLMService:
 
         Returns:
             Generated text response
+
+        Raises:
+            LLMUnavailableError: if no API key is configured or generation fails.
         """
         if not self.groq_api_key:
-            logger.warning("Groq API key not configured. Returning template response.")
-            return self._fallback_response(prompt)
+            raise LLMUnavailableError("Groq API key not configured")
 
         try:
             client = await self._get_client()
@@ -81,14 +87,7 @@ class AILLMService:
 
         except Exception as e:
             logger.error("Error generating with LLM: %s", type(e).__name__)
-            return self._fallback_response(prompt)
-
-    def _fallback_response(self, prompt: str) -> str:
-        """Never fabricate an assessment when the model is unavailable; say so explicitly."""
-        return (
-            "AI analysis is currently unavailable. This result was produced by rule-based scoring only "
-            "and should be reviewed by a person."
-        )
+            raise LLMUnavailableError("LLM generation failed") from e
 
 
 # Global LLM instance
@@ -231,20 +230,25 @@ Create a 90-day onboarding plan with:
 
 async def generate_hiring_insights(
     recent_hires_count: int,
-    open_positions: int,
-    avg_time_to_hire: float,
+    open_positions: int | None = None,
+    avg_time_to_hire: float | None = None,
 ) -> dict:
-    """Generate strategic hiring insights."""
+    """Generate strategic hiring insights. Optional metrics are omitted from the prompt when unknown."""
     llm = await get_llm()
 
-    system = """You are a data-driven HR analytics expert. Provide actionable 
+    system = """You are a data-driven HR analytics expert. Provide actionable
 insights to improve hiring effectiveness."""
+
+    metric_lines = [f"- Recent Hires (last 30 days): {recent_hires_count}"]
+    if open_positions is not None:
+        metric_lines.append(f"- Open Positions: {open_positions}")
+    if avg_time_to_hire is not None:
+        metric_lines.append(f"- Average Time to Hire: {avg_time_to_hire:.0f} days")
+    metrics_text = "\n".join(metric_lines)
 
     prompt = f"""
 Current Hiring Metrics:
-- Recent Hires (last 30 days): {recent_hires_count}
-- Open Positions: {open_positions}
-- Average Time to Hire: {avg_time_to_hire:.0f} days
+{metrics_text}
 
 Provide insights on:
 1. Hiring velocity assessment

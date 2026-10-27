@@ -8,13 +8,15 @@ from shared.core.config import get_settings
 logger = logging.getLogger(__name__)
 
 _memory_buckets: dict[str, tuple[int, int]] = {}
+_MEMORY_PRUNE_THRESHOLD = 10_000
 _redis = None
 _redis_failed_at = 0.0
 
 
 def client_ip(request: Request) -> str:
     if get_settings().trust_proxy_headers:
-        forwarded = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+        # The rightmost entry is the one appended by our trusted proxy; earlier ones are client-controlled.
+        forwarded = request.headers.get("x-forwarded-for", "").split(",")[-1].strip()
         if forwarded:
             return forwarded
     return request.client.host if request.client else "unknown"
@@ -40,6 +42,9 @@ async def _hit_redis(key: str, window: int) -> int:
 
 def _hit_memory(key: str, window: int) -> int:
     now = int(time.time())
+    if len(_memory_buckets) > _MEMORY_PRUNE_THRESHOLD:
+        for stale in [k for k, (_, reset) in _memory_buckets.items() if now >= reset]:
+            del _memory_buckets[stale]
     count, reset_at = _memory_buckets.get(key, (0, now + window))
     if now >= reset_at:
         count, reset_at = 0, now + window

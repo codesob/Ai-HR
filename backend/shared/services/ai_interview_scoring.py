@@ -9,6 +9,8 @@ from shared.services.ai_llm import (
 
 logger = logging.getLogger(__name__)
 
+_SCORE_WEIGHTS = {"technical": 0.35, "communication": 0.25, "problem_solving": 0.25, "culture_fit": 0.15}
+
 
 async def score_interview(
     interview_id: int,
@@ -35,14 +37,27 @@ async def score_interview(
         Interview score and AI explanation
     """
     metrics = performance_metrics or {}
-    tech_score = metrics.get("technical", 7.0)
-    comm_score = metrics.get("communication", 7.0)
-    problem_solving = metrics.get("problem_solving", 7.0)
-    culture_fit = metrics.get("culture_fit", 7.0)
+    supplied = {k: float(metrics[k]) for k in _SCORE_WEIGHTS if metrics.get(k) is not None}
+    missing = [k for k in _SCORE_WEIGHTS if k not in supplied]
+    if missing:
+        # Never invent scores: without every dimension there is no composite or recommendation.
+        return {
+            "interview_id": interview_id,
+            "candidate_name": candidate_name,
+            "job_title": job_title,
+            "scores": {**{k: round(v, 1) for k, v in supplied.items()}, "composite": None},
+            "recommendation": None,
+            "missing_metrics": missing,
+            "ai_analysis": f"Scores required for: {', '.join(missing)}. No composite score was computed.",
+            "scored_at": datetime.utcnow().isoformat(),
+        }
 
-    # Calculate composite score
-    composite = (tech_score * 0.35 + comm_score * 0.25 + problem_solving * 0.25 + culture_fit * 0.15)
-    
+    tech_score = supplied["technical"]
+    comm_score = supplied["communication"]
+    problem_solving = supplied["problem_solving"]
+    culture_fit = supplied["culture_fit"]
+    composite = sum(supplied[k] * w for k, w in _SCORE_WEIGHTS.items())
+
     # Get AI explanation
     try:
         ai_analysis = await generate_interview_score_explanation(

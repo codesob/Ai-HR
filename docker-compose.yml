@@ -67,7 +67,8 @@ services:
         required: false
     environment:
       <<: *backend-env
-      SEED_DEMO_DATA: ${SEED_DEMO_DATA:-}
+      # No value: passed through only if set in the shell/.env, so Settings applies its default otherwise.
+      SEED_DEMO_DATA:
     command: ["python", "-m", "shared.db.migrate"]
     depends_on:
       postgres:

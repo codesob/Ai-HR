@@ -1,10 +1,16 @@
 """AI-powered predictive hiring analytics."""
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from shared.services.ai_llm import generate_hiring_insights, get_llm
 
 logger = logging.getLogger(__name__)
+
+
+def _naive_utc(value: datetime | str) -> datetime:
+    """Parse ISO strings and convert aware datetimes to naive UTC so they compare with utcnow()."""
+    dt = datetime.fromisoformat(value) if isinstance(value, str) else value
+    return dt.astimezone(timezone.utc).replace(tzinfo=None) if dt.tzinfo else dt
 
 
 async def analyze_hiring_pipeline(
@@ -26,18 +32,14 @@ async def analyze_hiring_pipeline(
     now = datetime.utcnow()
     last_30_days = now - timedelta(days=30)
 
-    recent_hires = len([h for h in hires if h.get("created_at", now) > last_30_days])
+    recent_hires = len([h for h in hires if _naive_utc(h.get("created_at", now)) > last_30_days])
     total_applications = len(applications)
     pending_interviews = len([i for i in interviews if i.get("status") == "scheduled"])
     conversion_rate = (recent_hires / total_applications * 100) if total_applications > 0 else 0
 
-    # Get AI insights
+    # Only verified metrics go to the LLM: open positions and time-to-hire aren't known here.
     try:
-        insights = await generate_hiring_insights(
-            recent_hires_count=recent_hires,
-            open_positions=pending_interviews,
-            avg_time_to_hire=15.0,  # Default estimate
-        )
+        insights = await generate_hiring_insights(recent_hires_count=recent_hires)
         ai_insights = insights.get("insights", "")
     except Exception as e:
         logger.warning(f"AI insights generation failed: {e}")
@@ -72,7 +74,7 @@ async def predict_time_to_hire(
     Returns:
         Time to hire prediction
     """
-    posting_date = datetime.fromisoformat(job_posting_date)
+    posting_date = _naive_utc(job_posting_date)
     days_open = (datetime.utcnow() - posting_date).days
     
     # ML-based estimation
@@ -197,7 +199,7 @@ async def hiring_trend_analysis(
     # Group by month and calculate averages
     monthly_hires = {}
     for record in historical_data:
-        date = datetime.fromisoformat(record.get("created_at", datetime.utcnow().isoformat()))
+        date = _naive_utc(record.get("created_at", datetime.utcnow().isoformat()))
         month_key = date.strftime("%Y-%m")
         monthly_hires[month_key] = monthly_hires.get(month_key, 0) + 1
 

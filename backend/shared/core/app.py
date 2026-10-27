@@ -19,6 +19,8 @@ def install_request_context(app: FastAPI) -> None:
     @app.middleware("http")
     async def request_context(request: Request, call_next):
         rid = request.headers.get("x-request-id") or uuid.uuid4().hex
+        # The 500 handler runs after the contextvar is reset, so keep the id on the request too.
+        request.state.request_id = rid
         token = request_id_var.set(rid)
         try:
             response = await call_next(request)
@@ -29,9 +31,14 @@ def install_request_context(app: FastAPI) -> None:
 
     @app.exception_handler(Exception)
     async def unhandled(request: Request, exc: Exception):
-        logger.exception("Unhandled error", extra={"path": request.url.path, "method": request.method})
+        rid = getattr(request.state, "request_id", None) or request_id_var.get()
+        logger.exception(
+            "Unhandled error", extra={"path": request.url.path, "method": request.method, "request_id": rid}
+        )
         return JSONResponse(
-            {"detail": "Internal server error", "request_id": request_id_var.get()}, status_code=500
+            {"detail": "Internal server error", "request_id": rid},
+            status_code=500,
+            headers={"X-Request-ID": rid} if rid else None,
         )
 
 
