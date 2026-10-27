@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -8,11 +9,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from shared.api.rbac import require_roles
-from shared.db.session import get_db
+from shared.db.session import AsyncSessionLocal, get_db
 from shared.models.entities import Application, ApplicationStatus, CandidateProfile, Job, User, UserRole
-from shared.schemas.common import ApplicationOut, ApplicationStatusUpdate, ParsedResume
+from shared.schemas.common import ApplicationOut, ApplicationStatusUpdate, MatchExplanation, ParsedResume
 from shared.services.events import publish_notification
 from shared.services.matching import compute_match, rank_applications, rerank_candidates_with_nvidia
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/applications", tags=["applications"])
 
@@ -43,6 +46,40 @@ async def _profiles_by_user(db: AsyncSession, user_ids: list[int]) -> dict[int, 
     return {p.user_id: p for p in rows.scalars()}
 
 
+async def _score(job: Job, profile: CandidateProfile | None) -> MatchExplanation:
+    parsed = ParsedResume(**(profile.parsed_data or {})) if profile and profile.parsed_data else ParsedResume()
+    if profile and profile.skills:
+        parsed.skills = profile.skills
+        parsed.experience_years = profile.experience_years
+
+    # Embedding is CPU-bound; keep the event loop free for other requests.
+    return await asyncio.to_thread(
+        compute_match,
+        parsed,
+        job.description,
+        job.required_skills or [],
+        job.min_experience_years,
+        profile.resume_text if profile else None,
+    )
+
+
+async def score_unscored_applications() -> None:
+    """Score applications created outside the apply flow (imports, demo data) with the real matching model."""
+    async with AsyncSessionLocal() as db:
+        apps = (await db.execute(
+            select(Application).where(Application.match_score.is_(None)).options(selectinload(Application.job))
+        )).scalars().all()
+        if not apps:
+            return
+        profiles = await _profiles_by_user(db, list({a.candidate_id for a in apps}))
+        for app in apps:
+            match = await _score(app.job, profiles.get(app.candidate_id))
+            app.match_score = app.rank_score = match.match_score
+            app.match_explanation = match.model_dump()
+        await db.commit()
+        logger.info("Scored unscored applications", extra={"count": len(apps)})
+
+
 @router.post("/apply/{job_id}", response_model=ApplicationOut, status_code=201)
 async def apply_to_job(
     job_id: int,
@@ -63,20 +100,7 @@ async def apply_to_job(
         raise HTTPException(status_code=409, detail="Already applied") from None
 
     profile = (await _profiles_by_user(db, [user.id])).get(user.id)
-    parsed = ParsedResume(**(profile.parsed_data or {})) if profile and profile.parsed_data else ParsedResume()
-    if profile and profile.skills:
-        parsed.skills = profile.skills
-        parsed.experience_years = profile.experience_years
-
-    # Embedding is CPU-bound; keep the event loop free for other requests.
-    match = await asyncio.to_thread(
-        compute_match,
-        parsed,
-        job.description,
-        job.required_skills or [],
-        job.min_experience_years,
-        profile.resume_text if profile else None,
-    )
+    match = await _score(job, profile)
 
     app = Application(
         organization_id=user.organization_id,

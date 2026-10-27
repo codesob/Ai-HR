@@ -1,6 +1,24 @@
-# AI-HR - Intelligent Workforce Operating System
+# AI-HR: hire faster with AI that shows its work
 
-An AI-powered HR platform that automates recruitment, candidate intelligence, HR operations, analytics, and policy assistance. Built from the [complete HR blueprint](docs/BLUEPRINT.md) with an MVP-first architecture.
+AI-HR ranks every applicant against the role, **explains each score** (matched skills, named gaps and
+experience fit), and runs the rest of HR (interviews, onboarding, leave and payroll) in one multi-tenant
+workspace built for teams of 20–500.
+
+- **Explainable by design:** a transparent formula (45% meaning match, 35% required skills, 20% experience), never a black box.
+- **People decide:** the AI ranks and explains; it never rejects anyone. Every change is in an admin-visible activity log.
+- **One system:** careers page → ranked shortlist → interviews → onboarding → leave → payslips.
+
+## See it in two minutes
+
+```bash
+cp .env.example .env          # optional: add GROQ_API_KEY for AI-written insights and chat answers
+docker compose up -d --build  # first build downloads the ML models and takes a while
+```
+
+Open http://localhost:3000, click **Try the live demo**, and pick a role. You land in **Halcyon Robotics**,
+a sample company with candidates at every pipeline stage, all scored by the real matching engine.
+The presenter walkthrough is in [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md); the public
+[Trust & AI page](http://localhost:3000/trust) explains scoring and data handling for buyers.
 
 ## Architecture
 

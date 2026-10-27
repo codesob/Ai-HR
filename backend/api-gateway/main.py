@@ -13,7 +13,7 @@ from shared.core.app import create_service_app
 from shared.core.config import get_settings
 from shared.core.logging import request_id_var
 from shared.core.security import decode_access_token
-from shared.services.audit import write_audit_event
+from shared.services.audit import flush_pending_audit_events, write_audit_event
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -54,7 +54,7 @@ async def close_client() -> None:
         await _client.aclose()
 
 
-app = create_service_app("api-gateway", [auth_router, users_router], on_shutdown=[close_client])
+app = create_service_app("api-gateway", [auth_router, users_router], on_shutdown=[close_client, flush_pending_audit_events])
 
 
 def _claims(request: Request) -> dict:

@@ -19,16 +19,16 @@ export function AuthGate({
 }) {
   const { session, hydrated } = useSession();
 
-  if (!hydrated) return <p className="text-slate-400">Loading…</p>;
+  if (!hydrated) return <p className="text-muted">Loading…</p>;
 
   if (!session) {
     return (
       <div className="space-y-6">
-        <h1 className="text-2xl font-bold">{title}</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
         <LoginForm demoEmail={demoEmail} />
-        <p className="text-sm text-slate-400">
+        <p className="text-sm text-muted">
           New company?{" "}
-          <Link href="/signup" className="text-indigo-300 hover:underline">
+          <Link href="/signup" className="text-brand hover:underline">
             Create a workspace
           </Link>
         </p>
@@ -39,8 +39,8 @@ export function AuthGate({
   if (roles && !roles.includes(session.user.role)) {
     return (
       <div className="card max-w-lg space-y-3">
-        <h1 className="text-xl font-semibold">{title}</h1>
-        <p className="text-slate-400">Your account ({session.user.role}) doesn&apos;t have access to this page.</p>
+        <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
+        <p className="text-muted">Your account ({session.user.role}) doesn&apos;t have access to this page.</p>
         <Link href={homeFor(session.user.role)} className="btn-secondary">
           Go to your dashboard
         </Link>

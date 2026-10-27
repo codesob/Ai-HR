@@ -32,3 +32,14 @@ class PayslipOut(BaseModel):
     status: str
 
     model_config = {"from_attributes": True}
+
+
+class PayrollPeriod(BaseModel):
+    period_start: date
+    period_end: date
+
+    @model_validator(mode="after")
+    def _check_dates(self) -> "PayrollPeriod":
+        if self.period_end < self.period_start:
+            raise ValueError("period_end must be on or after period_start")
+        return self

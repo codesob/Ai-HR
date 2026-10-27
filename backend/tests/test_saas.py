@@ -186,6 +186,48 @@ async def test_payroll_scoped_to_organization(clients):
     assert (await pay.post(f"{API}/payroll/run", json=run, headers=bearer(a["access_token"]))).status_code == 409
 
 
+async def test_org_payroll_run_pays_everyone_once_and_stays_scoped(clients):
+    gw, pay = clients["api-gateway"], clients["payroll-automation-svc"]
+    a = await signup(gw, "Acme", "a@acme.io")
+    b = (await signup(gw, "Globex", "b@globex.io"))["access_token"]
+    admin_a = bearer(a["access_token"])
+    await pay.put(f"{API}/payroll/profile", json={"user_id": a["user"]["id"], "annual_base": 120000}, headers=admin_a)
+
+    rows = (await pay.get(f"{API}/payroll/profiles", headers=admin_a)).json()
+    assert [(r["full_name"], r["annual_base"], r["last_net_amount"]) for r in rows] == [("Owner", 120000, None)]
+    assert (await pay.get(f"{API}/payroll/profiles", headers=bearer(b))).json()[0]["annual_base"] is None
+
+    period = {"period_start": "2026-10-01", "period_end": "2026-10-31"}
+    first = (await pay.post(f"{API}/payroll/run-all", json=period, headers=admin_a)).json()
+    assert first["processed"] == 1 and first["skipped"] == 0 and first["total_net"] > 0
+    again = (await pay.post(f"{API}/payroll/run-all", json=period, headers=admin_a)).json()
+    assert again == {"processed": 0, "skipped": 1, "total_net": 0}
+    assert (await pay.post(f"{API}/payroll/run-all", json=period, headers=bearer(b))).json()["processed"] == 0
+    assert (await pay.get(f"{API}/payroll/profiles", headers=admin_a)).json()[0]["last_period_end"] == "2026-10-31"
+
+
+async def test_changes_are_recorded_in_workspace_audit_log(clients):
+    gw = clients["api-gateway"]
+    a = await signup(gw, "Acme", "a@acme.io")
+    b = (await signup(gw, "Globex", "b@globex.io"))["access_token"]
+    admin_a = bearer(a["access_token"])
+    from shared.services.audit import flush_pending_audit_events
+
+    invite = await gw.post(f"{API}/users/invite", json={"email": "r@acme.io", "role": "recruiter"}, headers=admin_a)
+    assert invite.status_code == 201
+    await flush_pending_audit_events()
+
+    log = (await gw.get(f"{API}/users/audit", headers=admin_a)).json()
+    assert log[0]["actor"] == "a@acme.io" and log[0]["action"] == "POST"
+    assert log[0]["resource"] == f"{API}/users/invite" and log[0]["status_code"] == 201
+    assert (await gw.get(f"{API}/users/audit", headers=bearer(b))).json() == []
+
+    recruiter = (await gw.post(f"{API}/auth/accept-invite", json={
+        "token": invite.json()["invite_url"].split("token=")[1], "full_name": "Rec", "password": "recruiter-pass-1",
+    })).json()["access_token"]
+    assert (await gw.get(f"{API}/users/audit", headers=bearer(recruiter))).status_code == 403
+
+
 async def test_leave_request_and_review(clients):
     gw, hr = clients["api-gateway"], clients["hr-ops-onboarding-svc"]
     admin = (await signup(gw, "Acme", "a@acme.io"))["access_token"]
@@ -270,11 +312,42 @@ async def test_concurrent_startup_seeding_is_safe():
 
     from sqlalchemy import func, select
 
-    from shared.db.seed import seed_demo_data
+    from shared.db.seed import CANDIDATES, STAFF, seed_demo_data
     from shared.db.session import AsyncSessionLocal
     from shared.models.entities import Organization, User
 
     await asyncio.gather(*(seed_demo_data() for _ in range(4)))
     async with AsyncSessionLocal() as db:
         assert (await db.execute(select(func.count()).select_from(Organization))).scalar() == 1
-        assert (await db.execute(select(func.count()).select_from(User))).scalar() == 4
+        # Staff, the demo candidate login, and the showcase applicants.
+        assert (await db.execute(select(func.count()).select_from(User))).scalar() == len(STAFF) + 1 + len(CANDIDATES)
+
+
+async def test_demo_workspace_is_scored_by_matching_engine_and_feeds_analytics(clients):
+    from shared.db.seed import APPLICATIONS, seed_demo_data
+    from tests.conftest import _apps
+
+    gw, me, an = clients["api-gateway"], clients["matching-engine-svc"], clients["analytics-dashboard-svc"]
+    await seed_demo_data()
+    await seed_demo_data()  # re-running must not duplicate the showcase
+
+    matching_app = _apps["matching-engine-svc"]
+    async with matching_app.router.lifespan_context(matching_app):
+        pass
+
+    login = await gw.post(f"{API}/auth/login", json={"email": "admin@aihr.demo", "password": "demo12345"})
+    assert login.status_code == 200, login.text
+    admin = bearer(login.json()["access_token"])
+
+    apps = (await me.get(f"{API}/applications", headers=admin)).json()
+    assert len(apps) == len(APPLICATIONS)
+    assert all(a["match_score"] is not None and a["match_explanation"] for a in apps)
+
+    ml_job = next(j for j in (await me.get(f"{API}/jobs", headers=admin)).json() if j["title"] == "Senior ML Engineer")
+    ranked = (await me.get(f"{API}/applications/ranked/{ml_job['id']}", headers=admin)).json()
+    assert ranked[0]["candidate_name"] == "Priya Natarajan"
+    assert ranked[0]["match_explanation"]["missing_skills"] == []
+
+    stats = (await an.get(f"{API}/analytics/hiring", headers=admin)).json()
+    assert stats["funnel"]["hired"] == 2 and stats["avg_match_score"] is not None
+    assert stats["avg_time_to_hire_days"] == pytest.approx((19 + 24) / 2, abs=1)

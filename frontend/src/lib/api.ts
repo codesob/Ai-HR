@@ -96,6 +96,16 @@ export const api = {
   reviewLeave: (id: number, status: "approved" | "rejected") =>
     request<LeaveRequest>(`/leave/${id}/review`, json("POST", { status })),
   myPayslips: () => request<Payslip[]>("/payroll/payslips/mine"),
+  salaryProfiles: () => request<SalaryRow[]>("/payroll/profiles"),
+  setSalary: (user_id: number, annual_base: number) =>
+    request<{ status: string }>("/payroll/profile", json("PUT", { user_id, annual_base })),
+  runPayroll: (period_start: string, period_end: string) =>
+    request<{ processed: number; skipped: number; total_net: number }>(
+      "/payroll/run-all",
+      json("POST", { period_start, period_end }),
+    ),
+
+  auditLog: () => request<AuditEntry[]>("/users/audit"),
 
   uploadResume: (file: File) => {
     const form = new FormData();
@@ -103,6 +113,25 @@ export const api = {
     return request<Record<string, unknown>>("/resumes/upload", { method: "POST", body: form });
   },
 };
+
+export interface SalaryRow {
+  user_id: number;
+  full_name: string;
+  role: string;
+  annual_base: number | null;
+  currency: string | null;
+  last_period_end: string | null;
+  last_net_amount: number | null;
+}
+
+export interface AuditEntry {
+  id: number;
+  actor: string;
+  action: string;
+  resource: string;
+  status_code: number | null;
+  created_at: string;
+}
 
 export interface Organization {
   id: number;
@@ -128,6 +157,9 @@ export interface MatchExplanation {
   explanation?: string;
   matched_skills?: string[];
   missing_skills?: string[];
+  semantic_similarity?: number;
+  skill_gap_score?: number;
+  experience_fit?: number;
 }
 
 export interface Application {

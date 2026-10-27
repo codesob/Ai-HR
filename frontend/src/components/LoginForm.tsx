@@ -28,21 +28,21 @@ export function LoginForm({ onSuccess, demoEmail }: { onSuccess?: () => void; de
   }
 
   return (
-    <form onSubmit={handleLogin} className="card max-w-md space-y-4">
+    <form onSubmit={handleLogin} className="card space-y-4">
       <h3 className="font-semibold">Sign in</h3>
-      {DEMO && demoEmail && <p className="text-xs text-slate-400">Demo account: {demoEmail} / demo12345</p>}
+      {DEMO && demoEmail && <p className="text-xs text-muted">Demo account: {demoEmail} / demo12345</p>}
       {error && (
-        <p role="alert" className="text-sm text-red-400">
+        <p role="alert" className="text-sm text-danger">
           {error}
         </p>
       )}
-      <label className="block space-y-1 text-sm">
-        <span className="text-slate-300">Email</span>
+      <label className="block">
+        <span className="label">Email</span>
         <input className="input" type="email" autoComplete="email" required value={email}
           onChange={(e) => setEmail(e.target.value)} />
       </label>
-      <label className="block space-y-1 text-sm">
-        <span className="text-slate-300">Password</span>
+      <label className="block">
+        <span className="label">Password</span>
         <input className="input" type="password" autoComplete="current-password" required value={password}
           onChange={(e) => setPassword(e.target.value)} />
       </label>

@@ -1,7 +1,7 @@
 import re
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,7 +16,7 @@ from shared.core.security import (
     verify_password,
 )
 from shared.db.session import get_db
-from shared.models.entities import Invitation, Organization, User, UserRole
+from shared.models.entities import AuditLog, Invitation, Organization, User, UserRole
 from shared.schemas.common import (
     AcceptInviteRequest,
     CandidateRegister,
@@ -165,6 +165,27 @@ async def list_users(
     if role:
         query = query.where(User.role == role)
     return (await db.execute(query)).scalars().all()
+
+
+@users_router.get("/audit")
+async def audit_log(
+    limit: int = Query(default=50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_roles(UserRole.ADMIN)),
+):
+    rows = (await db.execute(
+        select(AuditLog)
+        .where(AuditLog.organization_id == admin.organization_id)
+        .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
+        .limit(limit)
+    )).scalars()
+    return [
+        {
+            "id": r.id, "actor": r.actor, "action": r.action, "resource": r.resource,
+            "status_code": (r.metadata_json or {}).get("status_code"), "created_at": r.created_at,
+        }
+        for r in rows
+    ]
 
 
 @users_router.patch("/{user_id}", response_model=UserOut)

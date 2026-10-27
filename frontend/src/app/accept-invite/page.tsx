@@ -28,23 +28,23 @@ function AcceptInvite() {
     }
   }
 
-  if (!token) return <p className="text-slate-400">This invitation link is missing its token.</p>;
+  if (!token) return <p className="text-muted">This invitation link is missing its token.</p>;
 
   return (
     <form onSubmit={submit} className="card mx-auto max-w-md space-y-4">
-      <h1 className="text-xl font-semibold">Join your team on AI-HR</h1>
+      <h1 className="text-xl font-semibold tracking-tight">Join your team on AI-HR</h1>
       {error && (
-        <p role="alert" className="text-sm text-red-400">
+        <p role="alert" className="text-sm text-danger">
           {error}
         </p>
       )}
-      <label className="block space-y-1 text-sm">
-        <span className="text-slate-300">Your name</span>
+      <label className="block">
+        <span className="label">Your name</span>
         <input className="input" required autoComplete="name" value={fullName}
           onChange={(e) => setFullName(e.target.value)} />
       </label>
-      <label className="block space-y-1 text-sm">
-        <span className="text-slate-300">Choose a password (10+ characters)</span>
+      <label className="block">
+        <span className="label">Choose a password (10+ characters)</span>
         <input className="input" type="password" required minLength={10} autoComplete="new-password"
           value={password} onChange={(e) => setPassword(e.target.value)} />
       </label>
@@ -57,7 +57,7 @@ function AcceptInvite() {
 
 export default function AcceptInvitePage() {
   return (
-    <Suspense fallback={<p className="text-slate-400">Loading…</p>}>
+    <Suspense fallback={<p className="text-muted">Loading…</p>}>
       <AcceptInvite />
     </Suspense>
   );

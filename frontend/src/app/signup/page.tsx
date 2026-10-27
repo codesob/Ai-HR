@@ -33,31 +33,31 @@ export default function SignupPage() {
   }
 
   return (
-    <div className="mx-auto max-w-md space-y-6">
+    <div className="mx-auto max-w-md space-y-6 py-6">
       <div>
-        <h1 className="text-2xl font-bold">Create your company workspace</h1>
-        <p className="mt-1 text-slate-400">You&apos;ll be the workspace admin and can invite your team next.</p>
+        <h1 className="text-2xl font-semibold tracking-tight">Create your company workspace</h1>
+        <p className="mt-1 text-muted">You&apos;ll be the workspace admin and can invite your team next.</p>
       </div>
       <form onSubmit={submit} className="card space-y-4">
         {error && (
-          <p role="alert" className="text-sm text-red-400">
+          <p role="alert" className="text-sm text-danger">
             {error}
           </p>
         )}
-        <label className="block space-y-1 text-sm">
-          <span className="text-slate-300">Company name</span>
+        <label className="block">
+          <span className="label">Company name</span>
           <input className="input" required minLength={2} autoComplete="organization" {...field("company_name")} />
         </label>
-        <label className="block space-y-1 text-sm">
-          <span className="text-slate-300">Your name</span>
+        <label className="block">
+          <span className="label">Your name</span>
           <input className="input" required autoComplete="name" {...field("full_name")} />
         </label>
-        <label className="block space-y-1 text-sm">
-          <span className="text-slate-300">Work email</span>
+        <label className="block">
+          <span className="label">Work email</span>
           <input className="input" type="email" required autoComplete="email" {...field("email")} />
         </label>
-        <label className="block space-y-1 text-sm">
-          <span className="text-slate-300">Password (10+ characters)</span>
+        <label className="block">
+          <span className="label">Password (10+ characters)</span>
           <input className="input" type="password" required minLength={10} autoComplete="new-password"
             {...field("password")} />
         </label>
@@ -65,9 +65,9 @@ export default function SignupPage() {
           {loading ? "Creating workspace…" : "Create workspace"}
         </button>
       </form>
-      <p className="text-sm text-slate-400">
+      <p className="text-sm text-muted">
         Already have an account?{" "}
-        <Link href="/login" className="text-indigo-300 hover:underline">
+        <Link href="/login" className="text-brand hover:underline">
           Sign in
         </Link>
       </p>

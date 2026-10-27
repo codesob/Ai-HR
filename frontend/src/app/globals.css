@@ -1,77 +1,107 @@
 @import 'tailwindcss';
 
+/*
+  Design tokens. Components use these semantic names (text-ink, bg-surface, border-line, text-brand …),
+  never raw palette colors, so the whole product can be re-themed here.
+*/
 @theme {
-  --color-brand-50: #eef2ff;
-  --color-brand-100: #e0e7ff;
-  --color-brand-500: #6366f1;
-  --color-brand-600: #4f46e5;
-  --color-brand-700: #4338ca;
-  --color-brand-900: #312e81;
+  --font-sans: var(--font-dm-sans), ui-sans-serif, system-ui, sans-serif;
+
+  --color-canvas: #f6f5f1;
+  --color-surface: #fffffe;
+  --color-surface-2: #f0efea;
+  --color-line: #e4e2da;
+  --color-line-strong: #cfccc1;
+
+  --color-ink: #1b2033;
+  --color-ink-soft: #2c3249;
+  --color-muted: #5b6078;
+  --color-subtle: #80859b;
+
+  --color-navy: #0f1426;
+  --color-navy-2: #171d36;
+
+  --color-brand: #4f46e5;
+  --color-brand-hover: #4338ca;
+  --color-brand-soft: #eeedfd;
+  --color-brand-ink: #3730a3;
+
+  --color-success: #0f7a4f;
+  --color-success-soft: #e3f4ec;
+  --color-warning: #9a5b00;
+  --color-warning-soft: #fdf1dc;
+  --color-danger: #b42318;
+  --color-danger-soft: #fdeceb;
+
+  --radius-card: 1.25rem;
+  --shadow-card: 0 1px 2px rgb(27 32 51 / 0.04), 0 8px 24px -12px rgb(27 32 51 / 0.12);
 }
 
-/*
-  The default border color has changed to `currentcolor` in Tailwind CSS v4,
-  so we've added these compatibility styles to make sure everything still
-  looks the same as it did with Tailwind CSS v3.
-
-  If we ever want to remove these styles, we need to add an explicit border
-  color utility to any element that depends on these defaults.
-*/
 @layer base {
   *,
   ::after,
   ::before,
   ::backdrop,
   ::file-selector-button {
-    border-color: var(--color-gray-200, currentcolor);
+    border-color: var(--color-line);
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-canvas font-sans text-ink antialiased;
+  }
+
+  h1,
+  h2,
+  h3 {
+    @apply text-ink;
+    text-wrap: balance;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-brand);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background-color: var(--color-brand-soft);
+    color: var(--color-brand-ink);
   }
 }
 
-:root {
-  --bg: #0f172a;
-  --card: #111827;
-  --border: #334155;
-  --text: #f8fafc;
-  --muted: #94a3b8;
-  --accent: #6366f1;
-}
+@layer components {
+  .card {
+    @apply rounded-[var(--radius-card)] border border-line bg-surface p-6 shadow-[var(--shadow-card)];
+  }
 
-html {
-  scroll-behavior: smooth;
-}
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-brand px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-50;
+  }
 
-body {
-  @apply bg-slate-950 text-slate-100 antialiased;
-  background-image:
-    radial-gradient(circle at top left, rgba(99, 102, 241, 0.18), transparent 28%),
-    radial-gradient(circle at bottom right, rgba(56, 189, 248, 0.08), transparent 30%);
-}
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-line-strong bg-surface px-4 py-2.5 text-sm font-semibold text-ink transition hover:border-brand/50 hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-50;
+  }
 
-main {
-  @apply min-h-screen;
-}
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-muted transition hover:bg-surface-2 hover:text-ink;
+  }
 
-.card {
-  @apply rounded-4xl border border-slate-700/60 bg-slate-900/85 p-6 shadow-[0_24px_80px_-48px_rgba(15,23,42,0.9)] backdrop-blur-sm;
-}
+  .input {
+    @apply w-full rounded-xl border border-line-strong bg-surface px-3.5 py-2.5 text-sm text-ink placeholder:text-subtle transition focus:border-brand focus:outline-hidden focus:ring-3 focus:ring-brand/15;
+  }
 
-.btn-primary {
-  @apply inline-flex items-center justify-center rounded-2xl bg-indigo-600 px-5 py-3 font-semibold text-white transition hover:bg-indigo-500 disabled:opacity-50;
-}
+  .label {
+    @apply mb-1.5 block text-sm font-medium text-ink-soft;
+  }
 
-.btn-secondary {
-  @apply inline-flex items-center justify-center rounded-2xl border border-slate-600 bg-slate-900/90 px-5 py-3 font-semibold text-slate-100 transition hover:border-indigo-500/60 hover:bg-slate-800;
-}
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium;
+  }
 
-.input {
-  @apply w-full rounded-2xl border border-slate-600 bg-slate-900 px-4 py-3 text-slate-100 placeholder:text-slate-500 focus:border-indigo-500 focus:outline-hidden focus:ring-1 focus:ring-indigo-500;
-}
-
-.badge {
-  @apply inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium;
-}
-
-::selection {
-  background-color: rgba(99, 102, 241, 0.25);
-  color: #eef2ff;
+  .eyebrow {
+    @apply text-xs font-semibold uppercase tracking-[0.2em] text-brand;
+  }
 }
