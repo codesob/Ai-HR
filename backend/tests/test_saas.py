@@ -274,6 +274,8 @@ async def test_gateway_returns_429_not_500_when_rate_limited(clients, monkeypatc
     import shared.api.rate_limit as rl
 
     rl._memory_buckets.clear()
+    # Use the local fallback so Redis state from earlier tests cannot affect this assertion.
+    monkeypatch.setattr(rl, "_redis_failed_at", rl.time.monotonic())
     monkeypatch.setattr(get_settings(), "auth_rate_limit_requests", 2)
     codes = [
         (await gw.post(f"{API}/auth/login", json={"email": "x@y.io", "password": "nope"})).status_code
