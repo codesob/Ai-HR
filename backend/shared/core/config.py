@@ -3,7 +3,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import model_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -20,6 +20,18 @@ INSECURE_SECRET_KEYS = {
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=str(ENV_FILE), extra="ignore")
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def _use_asyncpg_for_render_postgres(cls, value: object) -> object:
+        # Render supplies PostgreSQL URLs with the default sync-driver scheme.
+        # This application uses SQLAlchemy's async engine and asyncpg.
+        if isinstance(value, str):
+            if value.startswith("postgres://"):
+                return "postgresql+asyncpg://" + value.removeprefix("postgres://")
+            if value.startswith("postgresql://"):
+                return "postgresql+asyncpg://" + value.removeprefix("postgresql://")
+        return value
 
     app_name: str = "AI-HR Platform"
     environment: Literal["development", "test", "production"] = "development"

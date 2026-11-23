@@ -11,6 +11,12 @@ const securityHeaders = [
 const nextConfig: NextConfig = {
   output: "standalone",
   poweredByHeader: false,
+  async rewrites() {
+    // Vercel proxies API requests through the frontend origin so auth cookies work
+    // with SameSite=Lax across the browser's requests.
+    const apiOrigin = process.env.API_ORIGIN?.replace(/\/$/, "");
+    return apiOrigin ? [{ source: "/api/:path*", destination: `${apiOrigin}/api/:path*` }] : [];
+  },
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },
