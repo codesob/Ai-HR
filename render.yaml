@@ -1,10 +1,13 @@
-# Temporary free demo. Render Free Postgres is deleted after its 30-day grace period,
-# and all free web services sleep when idle. Do not use this stack for real HR records.
+# Private, durable Render layout for the AI-HR application.
+# Only the API gateway is public. Feature APIs and Qdrant use Render's private network.
+# Estimated compute and storage charges are documented in docs/deployment/render.md.
 envVarGroups:
-  - name: codesob-aihr-demo-common
+  - name: codesob-aihr-production-common
     envVars:
       - key: ENVIRONMENT
         value: production
+      - key: PYTHON_VERSION
+        value: 3.14.10
       - key: SECRET_KEY
         generateValue: true
       - key: AUTO_CREATE_SCHEMA
@@ -13,298 +16,367 @@ envVarGroups:
         value: "false"
       - key: CORS_ORIGINS
         value: https://hire-lens-ai-platform.vercel.app
-      - key: QDRANT_URL
-        value: https://codesob-aihr-demo-qdrant.onrender.com
+      - key: FRONTEND_URL
+        value: https://hire-lens-ai-platform.vercel.app
       - key: WEB_CONCURRENCY
         value: "1"
 
 services:
   - type: web
-    name: codesob-aihr-demo-api
+    name: codesob-aihr-api
     runtime: python
-    plan: free
+    plan: 0.5c-512mb
     region: oregon
     rootDir: backend
     buildCommand: pip install -r requirements.txt
-    startCommand: python -m shared.db.migrate && uvicorn main:app --app-dir api-gateway --host 0.0.0.0 --port $PORT --workers 1
+    preDeployCommand: python -m shared.db.migrate
+    startCommand: uvicorn main:app --app-dir api-gateway --host 0.0.0.0 --port $PORT --workers 1
     healthCheckPath: /health
     autoDeployTrigger: checksPass
     envVars:
-      - fromGroup: codesob-aihr-demo-common
-      - key: SEED_DEMO_DATA
-        value: "true"
+      - fromGroup: codesob-aihr-production-common
       - key: DATABASE_URL
         fromDatabase:
-          name: codesob-aihr-demo-db
+          name: codesob-aihr-postgres
           property: connectionString
       - key: REDIS_URL
         fromService:
           type: keyvalue
-          name: codesob-aihr-demo-cache
+          name: codesob-aihr-redis
           property: connectionString
+      - key: QDRANT_URL
+        fromService:
+          type: pserv
+          name: codesob-aihr-qdrant
+          property: hostport
+      - key: QDRANT_API_KEY
+        fromService:
+          type: pserv
+          name: codesob-aihr-qdrant
+          envVarKey: QDRANT__SERVICE__API_KEY
       - key: RESUME_SERVICE_URL
-        value: https://codesob-aihr-demo-resume.onrender.com
+        fromService:
+          type: pserv
+          name: codesob-aihr-resume
+          property: hostport
       - key: MATCHING_SERVICE_URL
-        value: https://codesob-aihr-demo-matching.onrender.com
+        fromService:
+          type: pserv
+          name: codesob-aihr-matching
+          property: hostport
       - key: INTERVIEW_SERVICE_URL
-        value: https://codesob-aihr-demo-interview.onrender.com
+        fromService:
+          type: pserv
+          name: codesob-aihr-interview
+          property: hostport
       - key: ANALYTICS_SERVICE_URL
-        value: https://codesob-aihr-demo-analytics.onrender.com
+        fromService:
+          type: pserv
+          name: codesob-aihr-analytics
+          property: hostport
       - key: HR_OPS_SERVICE_URL
-        value: https://codesob-aihr-demo-hr-ops.onrender.com
+        fromService:
+          type: pserv
+          name: codesob-aihr-hr-ops
+          property: hostport
       - key: CHATBOT_SERVICE_URL
-        value: https://codesob-aihr-demo-chatbot.onrender.com
+        fromService:
+          type: pserv
+          name: codesob-aihr-chatbot
+          property: hostport
       - key: PAYROLL_SERVICE_URL
-        value: https://codesob-aihr-demo-payroll.onrender.com
+        fromService:
+          type: pserv
+          name: codesob-aihr-payroll
+          property: hostport
       - key: NOTIFICATION_SERVICE_URL
-        value: https://codesob-aihr-demo-notifications.onrender.com
-      - key: QDRANT_API_KEY
         fromService:
-          type: web
-          name: codesob-aihr-demo-qdrant
-          envVarKey: QDRANT__SERVICE__API_KEY
+          type: pserv
+          name: codesob-aihr-notifications
+          property: hostport
 
-  - type: web
-    name: codesob-aihr-demo-resume
+  - type: pserv
+    name: codesob-aihr-resume
     runtime: python
-    plan: free
+    plan: 1c-2g
     region: oregon
     rootDir: backend
     buildCommand: pip install -r requirements.txt && pip install -r requirements-ml.txt --extra-index-url https://download.pytorch.org/whl/cpu
-    startCommand: uvicorn app.main:app --app-dir resume-parsing-svc --host 0.0.0.0 --port $PORT --workers 1
-    healthCheckPath: /health
+    startCommand: uvicorn app.main:app --app-dir resume-parsing-svc --host 0.0.0.0 --port 10000 --workers 1
     autoDeployTrigger: checksPass
+    disk:
+      name: uploads
+      mountPath: /var/data
+      sizeGB: 10
     envVars:
-      - fromGroup: codesob-aihr-demo-common
+      - fromGroup: codesob-aihr-production-common
       - key: DATABASE_URL
         fromDatabase:
-          name: codesob-aihr-demo-db
+          name: codesob-aihr-postgres
           property: connectionString
       - key: REDIS_URL
         fromService:
           type: keyvalue
-          name: codesob-aihr-demo-cache
+          name: codesob-aihr-redis
           property: connectionString
+      - key: QDRANT_URL
+        fromService:
+          type: pserv
+          name: codesob-aihr-qdrant
+          property: hostport
       - key: QDRANT_API_KEY
         fromService:
-          type: web
-          name: codesob-aihr-demo-qdrant
+          type: pserv
+          name: codesob-aihr-qdrant
           envVarKey: QDRANT__SERVICE__API_KEY
+      - key: UPLOAD_DIR
+        value: /var/data/uploads
 
-  - type: web
-    name: codesob-aihr-demo-matching
+  - type: pserv
+    name: codesob-aihr-matching
     runtime: python
-    plan: free
+    plan: 1c-2g
     region: oregon
     rootDir: backend
     buildCommand: pip install -r requirements.txt && pip install -r requirements-ml.txt --extra-index-url https://download.pytorch.org/whl/cpu
-    startCommand: uvicorn app.main:app --app-dir matching-engine-svc --host 0.0.0.0 --port $PORT --workers 1
-    healthCheckPath: /health
+    startCommand: uvicorn app.main:app --app-dir matching-engine-svc --host 0.0.0.0 --port 10000 --workers 1
     autoDeployTrigger: checksPass
     envVars:
-      - fromGroup: codesob-aihr-demo-common
+      - fromGroup: codesob-aihr-production-common
       - key: DATABASE_URL
         fromDatabase:
-          name: codesob-aihr-demo-db
+          name: codesob-aihr-postgres
           property: connectionString
       - key: REDIS_URL
         fromService:
           type: keyvalue
-          name: codesob-aihr-demo-cache
+          name: codesob-aihr-redis
           property: connectionString
+      - key: QDRANT_URL
+        fromService:
+          type: pserv
+          name: codesob-aihr-qdrant
+          property: hostport
       - key: QDRANT_API_KEY
         fromService:
-          type: web
-          name: codesob-aihr-demo-qdrant
+          type: pserv
+          name: codesob-aihr-qdrant
           envVarKey: QDRANT__SERVICE__API_KEY
 
-  - type: web
-    name: codesob-aihr-demo-chatbot
+  - type: pserv
+    name: codesob-aihr-chatbot
     runtime: python
-    plan: free
+    plan: 1c-2g
     region: oregon
     rootDir: backend
     buildCommand: pip install -r requirements.txt && pip install -r requirements-ml.txt --extra-index-url https://download.pytorch.org/whl/cpu
-    startCommand: uvicorn app.main:app --app-dir chatbot-rag-assistant-svc --host 0.0.0.0 --port $PORT --workers 1
-    healthCheckPath: /health
+    startCommand: uvicorn app.main:app --app-dir chatbot-rag-assistant-svc --host 0.0.0.0 --port 10000 --workers 1
     autoDeployTrigger: checksPass
     envVars:
-      - fromGroup: codesob-aihr-demo-common
+      - fromGroup: codesob-aihr-production-common
       - key: DATABASE_URL
         fromDatabase:
-          name: codesob-aihr-demo-db
+          name: codesob-aihr-postgres
           property: connectionString
       - key: REDIS_URL
         fromService:
           type: keyvalue
-          name: codesob-aihr-demo-cache
+          name: codesob-aihr-redis
           property: connectionString
+      - key: QDRANT_URL
+        fromService:
+          type: pserv
+          name: codesob-aihr-qdrant
+          property: hostport
       - key: QDRANT_API_KEY
         fromService:
-          type: web
-          name: codesob-aihr-demo-qdrant
+          type: pserv
+          name: codesob-aihr-qdrant
           envVarKey: QDRANT__SERVICE__API_KEY
 
-  - type: web
-    name: codesob-aihr-demo-interview
+  - type: pserv
+    name: codesob-aihr-interview
     runtime: python
-    plan: free
+    plan: 0.5c-512mb
     region: oregon
     rootDir: backend
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn app.main:app --app-dir interview-assistant-svc --host 0.0.0.0 --port $PORT --workers 1
-    healthCheckPath: /health
+    startCommand: uvicorn app.main:app --app-dir interview-assistant-svc --host 0.0.0.0 --port 10000 --workers 1
     autoDeployTrigger: checksPass
     envVars:
-      - fromGroup: codesob-aihr-demo-common
+      - fromGroup: codesob-aihr-production-common
       - key: DATABASE_URL
         fromDatabase:
-          name: codesob-aihr-demo-db
+          name: codesob-aihr-postgres
           property: connectionString
       - key: REDIS_URL
         fromService:
           type: keyvalue
-          name: codesob-aihr-demo-cache
+          name: codesob-aihr-redis
           property: connectionString
+      - key: QDRANT_URL
+        fromService:
+          type: pserv
+          name: codesob-aihr-qdrant
+          property: hostport
       - key: QDRANT_API_KEY
         fromService:
-          type: web
-          name: codesob-aihr-demo-qdrant
+          type: pserv
+          name: codesob-aihr-qdrant
           envVarKey: QDRANT__SERVICE__API_KEY
 
-  - type: web
-    name: codesob-aihr-demo-analytics
+  - type: pserv
+    name: codesob-aihr-analytics
     runtime: python
-    plan: free
+    plan: 0.5c-512mb
     region: oregon
     rootDir: backend
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn app.main:app --app-dir analytics-dashboard-svc --host 0.0.0.0 --port $PORT --workers 1
-    healthCheckPath: /health
+    startCommand: uvicorn app.main:app --app-dir analytics-dashboard-svc --host 0.0.0.0 --port 10000 --workers 1
     autoDeployTrigger: checksPass
     envVars:
-      - fromGroup: codesob-aihr-demo-common
+      - fromGroup: codesob-aihr-production-common
       - key: DATABASE_URL
         fromDatabase:
-          name: codesob-aihr-demo-db
+          name: codesob-aihr-postgres
           property: connectionString
       - key: REDIS_URL
         fromService:
           type: keyvalue
-          name: codesob-aihr-demo-cache
+          name: codesob-aihr-redis
           property: connectionString
+      - key: QDRANT_URL
+        fromService:
+          type: pserv
+          name: codesob-aihr-qdrant
+          property: hostport
       - key: QDRANT_API_KEY
         fromService:
-          type: web
-          name: codesob-aihr-demo-qdrant
+          type: pserv
+          name: codesob-aihr-qdrant
           envVarKey: QDRANT__SERVICE__API_KEY
 
-  - type: web
-    name: codesob-aihr-demo-hr-ops
+  - type: pserv
+    name: codesob-aihr-hr-ops
     runtime: python
-    plan: free
+    plan: 0.5c-512mb
     region: oregon
     rootDir: backend
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn app.main:app --app-dir hr-ops-onboarding-svc --host 0.0.0.0 --port $PORT --workers 1
-    healthCheckPath: /health
+    startCommand: uvicorn app.main:app --app-dir hr-ops-onboarding-svc --host 0.0.0.0 --port 10000 --workers 1
     autoDeployTrigger: checksPass
     envVars:
-      - fromGroup: codesob-aihr-demo-common
+      - fromGroup: codesob-aihr-production-common
       - key: DATABASE_URL
         fromDatabase:
-          name: codesob-aihr-demo-db
+          name: codesob-aihr-postgres
           property: connectionString
       - key: REDIS_URL
         fromService:
           type: keyvalue
-          name: codesob-aihr-demo-cache
+          name: codesob-aihr-redis
           property: connectionString
+      - key: QDRANT_URL
+        fromService:
+          type: pserv
+          name: codesob-aihr-qdrant
+          property: hostport
       - key: QDRANT_API_KEY
         fromService:
-          type: web
-          name: codesob-aihr-demo-qdrant
+          type: pserv
+          name: codesob-aihr-qdrant
           envVarKey: QDRANT__SERVICE__API_KEY
 
-  - type: web
-    name: codesob-aihr-demo-payroll
+  - type: pserv
+    name: codesob-aihr-payroll
     runtime: python
-    plan: free
+    plan: 0.5c-512mb
     region: oregon
     rootDir: backend
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn app.main:app --app-dir payroll-automation-svc --host 0.0.0.0 --port $PORT --workers 1
-    healthCheckPath: /health
+    startCommand: uvicorn app.main:app --app-dir payroll-automation-svc --host 0.0.0.0 --port 10000 --workers 1
     autoDeployTrigger: checksPass
     envVars:
-      - fromGroup: codesob-aihr-demo-common
+      - fromGroup: codesob-aihr-production-common
       - key: DATABASE_URL
         fromDatabase:
-          name: codesob-aihr-demo-db
+          name: codesob-aihr-postgres
           property: connectionString
       - key: REDIS_URL
         fromService:
           type: keyvalue
-          name: codesob-aihr-demo-cache
+          name: codesob-aihr-redis
           property: connectionString
+      - key: QDRANT_URL
+        fromService:
+          type: pserv
+          name: codesob-aihr-qdrant
+          property: hostport
       - key: QDRANT_API_KEY
         fromService:
-          type: web
-          name: codesob-aihr-demo-qdrant
+          type: pserv
+          name: codesob-aihr-qdrant
           envVarKey: QDRANT__SERVICE__API_KEY
 
-  - type: web
-    name: codesob-aihr-demo-notifications
+  - type: pserv
+    name: codesob-aihr-notifications
     runtime: python
-    plan: free
+    plan: 0.5c-512mb
     region: oregon
     rootDir: backend
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn app.main:app --app-dir notification-scheduling-svc --host 0.0.0.0 --port $PORT --workers 1
-    healthCheckPath: /health
+    startCommand: uvicorn app.main:app --app-dir notification-scheduling-svc --host 0.0.0.0 --port 10000 --workers 1
     autoDeployTrigger: checksPass
     envVars:
-      - fromGroup: codesob-aihr-demo-common
+      - fromGroup: codesob-aihr-production-common
       - key: DATABASE_URL
         fromDatabase:
-          name: codesob-aihr-demo-db
+          name: codesob-aihr-postgres
           property: connectionString
       - key: REDIS_URL
         fromService:
           type: keyvalue
-          name: codesob-aihr-demo-cache
+          name: codesob-aihr-redis
           property: connectionString
+      - key: QDRANT_URL
+        fromService:
+          type: pserv
+          name: codesob-aihr-qdrant
+          property: hostport
       - key: QDRANT_API_KEY
         fromService:
-          type: web
-          name: codesob-aihr-demo-qdrant
+          type: pserv
+          name: codesob-aihr-qdrant
           envVarKey: QDRANT__SERVICE__API_KEY
 
-  - type: web
-    name: codesob-aihr-demo-qdrant
+  - type: pserv
+    name: codesob-aihr-qdrant
     runtime: image
     image:
       url: qdrant/qdrant:v1.20.0
-    plan: free
+    plan: 0.5c-512mb
     region: oregon
-    healthCheckPath: /readyz
+    disk:
+      name: qdrant-data
+      mountPath: /qdrant/storage
+      sizeGB: 10
     envVars:
-      - key: QDRANT__SERVICE__HTTP_PORT
-        value: "10000"
       - key: QDRANT__SERVICE__API_KEY
         generateValue: true
+      - key: QDRANT__SERVICE__HTTP_PORT
+        value: "6333"
 
   - type: keyvalue
-    name: codesob-aihr-demo-cache
-    plan: free
+    name: codesob-aihr-redis
+    plan: 256mb
     region: oregon
     ipAllowList: []
 
 databases:
-  - name: codesob-aihr-demo-db
-    databaseName: aihr_demo
-    user: aihr_demo
-    plan: free
+  - name: codesob-aihr-postgres
+    databaseName: aihr
+    user: aihr
+    plan: 0.5c-1g
     region: oregon
     postgresMajorVersion: "18"
     ipAllowList: []

@@ -33,6 +33,25 @@ class Settings(BaseSettings):
                 return "postgresql+asyncpg://" + value.removeprefix("postgresql://")
         return value
 
+    @field_validator(
+        "qdrant_url",
+        "resume_service_url",
+        "matching_service_url",
+        "interview_service_url",
+        "analytics_service_url",
+        "hr_ops_service_url",
+        "chatbot_service_url",
+        "payroll_service_url",
+        "notification_service_url",
+        mode="before",
+    )
+    @classmethod
+    def _add_http_scheme_to_service_address(cls, value: object) -> object:
+        # Render Blueprints expose private service addresses as host:port pairs.
+        if isinstance(value, str) and not value.startswith(("http://", "https://")):
+            return f"http://{value}"
+        return value
+
     app_name: str = "AI-HR Platform"
     environment: Literal["development", "test", "production"] = "development"
     log_level: str = "INFO"
