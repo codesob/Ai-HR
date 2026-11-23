@@ -126,8 +126,33 @@ export const api = {
   approveAction: (id: number) => request<AgentAction>(`/agent/actions/${id}/approve`, { method: "POST" }),
   rejectAction: (id: number) => request<AgentAction>(`/agent/actions/${id}/reject`, { method: "POST" }),
 
-  interviews: () => request<Interview[]>("/interviews"),
+  interviews: (applicationId?: number) =>
+    request<Interview[]>(`/interviews${applicationId ? `?application_id=${applicationId}` : ""}`),
   scheduleInterview: (payload: object) => request<Interview>("/interviews", json("POST", payload)),
+  interview: (id: number) => request<InterviewDetail>(`/interviews/${id}`),
+  myInterviews: () => request<MyInterview[]>("/interviews/mine"),
+  prepareQuestions: (id: number) => request<InterviewDetail>(`/interviews/${id}/prep`, { method: "POST" }),
+  saveScorecard: (id: number, card: { rating: number; recommendation: string; notes: string }) =>
+    request<InterviewDetail>(`/interviews/${id}/scorecard`, json("PUT", card)),
+  joinRoom: (id: number) => request<Room>(`/interviews/${id}/room/join`, { method: "POST" }),
+  sendSignal: (id: number, kind: string, data: object = {}) =>
+    request<void>(`/interviews/${id}/room/signal`, json("POST", { kind, data })),
+  waitSignals: (id: number, after: number, signal?: AbortSignal) =>
+    request<{ messages: Signal[]; cursor: number }>(`/interviews/${id}/room/signal?after=${after}`, { signal }),
+  setRecordingConsent: (id: number, allowed: boolean) =>
+    request<void>(`/interviews/${id}/room/consent`, json("POST", { allowed })),
+  setRecording: (id: number, on: boolean) => request<void>(`/interviews/${id}/room/recording`, json("POST", { on })),
+  uploadInterviewAudio: (id: number, part: number, track: "interviewer" | "candidate", offset: number,
+    language: "en" | "ne" | "", audio: Blob) => {
+    const form = new FormData();
+    form.append("part", String(part));
+    form.append("track", track);
+    form.append("offset", offset.toFixed(1));
+    form.append("language", language);
+    form.append("file", new File([audio], `part-${part}-${track}.webm`, { type: audio.type || "audio/webm" }));
+    return request<void>(`/interviews/${id}/room/audio`, { method: "POST", body: form });
+  },
+  endInterview: (id: number) => request<InterviewDetail>(`/interviews/${id}/room/end`, { method: "POST" }),
 
   myLeave: () => request<LeaveRequest[]>("/leave/mine"),
   requestLeave: (payload: { leave_type: string; start_date: string; end_date: string; reason: string }) =>
@@ -137,13 +162,23 @@ export const api = {
     request<LeaveRequest>(`/leave/${id}/review`, json("POST", { status })),
   myPayslips: () => request<Payslip[]>("/payroll/payslips/mine"),
   salaryProfiles: () => request<SalaryRow[]>("/payroll/profiles"),
-  setSalary: (user_id: number, annual_base: number) =>
-    request<{ status: string }>("/payroll/profile", json("PUT", { user_id, annual_base })),
-  runPayroll: (period_start: string, period_end: string) =>
-    request<{ processed: number; skipped: number; total_net: number }>(
+  setSalary: (profile: SalaryInput) => request<{ status: string }>("/payroll/profile", json("PUT", profile)),
+  payrollPeriod: () => request<PayrollPeriod>("/payroll/period"),
+  runPayroll: (period_start: string, period_end: string, festival_allowance = false) =>
+    request<{ processed: number; skipped: number; total_net: number; bs_month: string; fiscal_year: string }>(
       "/payroll/run-all",
-      json("POST", { period_start, period_end }),
+      json("POST", { period_start, period_end, festival_allowance }),
     ),
+  remittance: (bs_year: number, bs_month: number) =>
+    request<Remittance>(`/payroll/remittance?bs_year=${bs_year}&bs_month=${bs_month}`),
+  /** One row per person for keying into the SSF and IRD portals (cookie-authenticated, so fetched as a blob). */
+  remittanceCsv: async (bs_year: number, bs_month: number) => {
+    const res = await fetch(`${API_URL}${PREFIX}/payroll/remittance?bs_year=${bs_year}&bs_month=${bs_month}&format=csv`, {
+      credentials: "include",
+    });
+    if (!res.ok) throw new Error("Couldn't download the remittance sheet");
+    return res.blob();
+  },
 
   auditLog: () => request<AuditEntry[]>("/users/audit"),
 
@@ -200,14 +235,49 @@ export interface DeviceSession {
   current: boolean;
 }
 
-export interface SalaryRow {
+/** Yearly pay in NPR plus what Nepal's SSF and income tax rules need to know about the person. */
+export interface SalaryInput {
   user_id: number;
-  full_name: string;
-  role: string;
-  annual_base: number | null;
-  currency: string | null;
+  annual_base: number;
+  basic_monthly: number | null;
+  ssf_enrolled: boolean;
+  married: boolean;
+  female: boolean;
+  remote_category: "A" | "B" | "C" | "D" | "E" | null;
+  cit_monthly: number;
+  life_insurance_annual: number;
+  health_insurance_annual: number;
+  pan: string | null;
+  ssf_number: string | null;
+  joined_on: string | null;
+}
+
+export type SalaryRow = { full_name: string; role: string; currency: string | null } & {
+  [K in keyof SalaryInput]: K extends "user_id" ? number : SalaryInput[K] | null;
+} & {
   last_period_end: string | null;
   last_net_amount: number | null;
+  last_bs_month: string | null;
+};
+
+export interface PayrollPeriod {
+  bs_year: number;
+  bs_month: number;
+  label: string;
+  fiscal_year: string;
+  period_start: string;
+  period_end: string;
+  days: number;
+}
+
+export interface Remittance {
+  bs_month: string;
+  fiscal_year: string;
+  people: { user_id: number; full_name: string; ssf_total: number; tds: number; net: number }[];
+  ssf: { employee: number; employer: number; total: number; due: string };
+  ird: { sst_11211: number; income_tax: number; total: number; due: string };
+  missing_pan: string[];
+  missing_ssf_number: string[];
 }
 
 export interface AuditEntry {
@@ -292,6 +362,67 @@ export interface Interview {
   status: string;
 }
 
+export interface TranscriptLine {
+  at: number;
+  speaker: "interviewer" | "candidate";
+  text: string;
+}
+
+export interface InterviewSummary {
+  overview: string;
+  skills: { skill: string; evidence: string; level: "strong" | "some" | "none" }[];
+  strengths: string[];
+  concerns: string[];
+  follow_ups: string[];
+  recommendation: "advance" | "unsure" | "decline";
+}
+
+export interface InterviewDetail extends Interview {
+  candidate_name: string | null;
+  job_title: string | null;
+  prep_questions: { question: string; why: string }[];
+  recording_consent: boolean | null;
+  recording_on: boolean;
+  recorded_parts: number;
+  transcript: TranscriptLine[];
+  transcript_english: string | null;
+  summary: InterviewSummary | null;
+  summary_status: "" | "processing" | "ready" | "failed";
+  scorecard: { rating: number; recommendation: string; notes: string; by: string; at: string } | null;
+  started_at: string | null;
+  ended_at: string | null;
+}
+
+export interface MyInterview {
+  id: number;
+  job_title: string;
+  scheduled_at: string;
+  duration_minutes: number;
+  status: string;
+}
+
+export interface Room {
+  id: number;
+  role: "interviewer" | "candidate";
+  job_title: string;
+  candidate_name: string;
+  scheduled_at: string;
+  duration_minutes: number;
+  status: string;
+  backup_link: string | null;
+  recording_consent: boolean | null;
+  recording_on: boolean;
+  ice_servers: RTCIceServer[];
+  cursor: number;
+  prep_questions: { question: string; why: string }[];
+}
+
+export interface Signal {
+  id: number;
+  kind: "hello" | "offer" | "answer" | "ice" | "bye" | "consent" | "recording";
+  data: Record<string, unknown>;
+}
+
 export interface LeaveRequest {
   id: number;
   user_id: number;
@@ -302,6 +433,22 @@ export interface LeaveRequest {
   reason: string;
 }
 
+export interface PayslipBreakdown {
+  fiscal_year: string;
+  bs_month: string;
+  basic: number;
+  allowances: number;
+  festival_allowance: number;
+  ssf_employee: number;
+  ssf_employer: number;
+  cit: number;
+  tds: number;
+  sst: number;
+  projection: { months_left: number; taxable: number; annual_tax: number; retirement_deduction: number };
+  warnings: string[];
+  unverified: string[];
+}
+
 export interface Payslip {
   id: number;
   period_start: string;
@@ -309,6 +456,8 @@ export interface Payslip {
   gross_amount: number;
   tax_deduction: number;
   net_amount: number;
+  ssf_employee: number;
+  breakdown: Partial<PayslipBreakdown>;
 }
 
 export interface AgentTurn {

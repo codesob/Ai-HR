@@ -96,11 +96,11 @@ APPLICATIONS = [
 
 # name, email local part, role, annual base
 STAFF = [
-    ("Maya Torres", "admin", "admin", 150000),
-    ("Alex Kim", "recruiter", "recruiter", 98000),
-    ("Sam Okafor", "employee", "employee", 112000),
-    ("Grace Liu", "grace", "employee", 135000),
-    ("Ravi Shah", "ravi", "employee", 121000),
+    ("Maya Torres", "admin", "admin", 2400000),
+    ("Alex Kim", "recruiter", "recruiter", 960000),
+    ("Sam Okafor", "employee", "employee", 840000),
+    ("Grace Liu", "grace", "employee", 1320000),
+    ("Ravi Shah", "ravi", "employee", 600000),
 ]
 
 # staff email, leave type, start offset in days from today, length in days, status, reason
@@ -251,7 +251,9 @@ async def _seed_showcase(db, org_id: int) -> None:
                                   status="in_progress"))
 
     for _, local, _, annual_base in STAFF:
-        db.add(SalaryProfile(organization_id=org_id, user_id=users[f"{local}@aihr.demo"].id, annual_base=annual_base))
+        # Yearly pay in NPR; 60% of it is basic, which SSF is charged on.
+        db.add(SalaryProfile(organization_id=org_id, user_id=users[f"{local}@aihr.demo"].id, annual_base=annual_base,
+                             basic_monthly=round(annual_base / 12 * 0.6), female=local in ("admin", "grace")))
 
     reviewer = users["admin@aihr.demo"]
     for local, leave_type, start, length, status, reason in LEAVE:

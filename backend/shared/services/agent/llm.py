@@ -50,7 +50,7 @@ def configured() -> bool:
     return bool(s.agent_llm_api_key or s.groq_api_key)
 
 
-async def complete(messages: list[dict], tools: list[dict]) -> LLMReply:
+async def complete(messages: list[dict], tools: list[dict], max_tokens: int = 800) -> LLMReply:
     s = get_settings()
     api_key = s.agent_llm_api_key or s.groq_api_key
     if not api_key:
@@ -61,7 +61,7 @@ async def complete(messages: list[dict], tools: list[dict]) -> LLMReply:
         "messages": messages,
         "temperature": 0.2,
         # Counts against per-minute token limits even when unused, so keep it modest.
-        "max_tokens": 800,
+        "max_tokens": max_tokens,
     }
     if tools:
         body["tools"] = tools

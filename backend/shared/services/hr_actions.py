@@ -5,7 +5,7 @@ change made by a person in the app. Every function is scoped to one organization
 """
 
 import secrets
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -18,6 +18,8 @@ from shared.models.leave import LeaveBalance, LeaveRequest, LeaveStatus, LeaveTy
 from shared.models.payroll import Payslip, SalaryProfile
 from shared.services.candidate_emails import company_name, email_applicant, stage_message
 from shared.services.events import publish_notification
+from shared.services.nepal import payroll as nepal_payroll
+from shared.services.nepal.calendar import BSMonth, month_of
 from shared.services.onboarding import create_onboarding_plan
 
 
@@ -93,10 +95,14 @@ async def schedule_interview(
 
     when = scheduled_at.strftime("%Y-%m-%d %H:%M %Z").strip()
     job_title = application.job.title if application.job else "the role"
-    link = f"\nJoin: {meeting_link}" if meeting_link else ""
-    for recipient, subject in (
-        (interviewer_email, f"Interview scheduled: {job_title}"),
-        (application.candidate.email, f"Your interview for {job_title}"),
+    room = f"{get_settings().frontend_url.rstrip('/')}/interview/{interview.id}"
+    backup = f"\nIf the call won't connect, use this backup room: {meeting_link}" if meeting_link else ""
+    for recipient, subject, extra in (
+        (interviewer_email, f"Interview scheduled: {job_title}", "\n\nThe room has suggested questions ready, and "
+         "if the applicant agrees to recording you'll get a transcript and notes afterwards."),
+        (application.candidate.email, f"Your interview for {job_title}", "\n\nIt's a video call in your browser; "
+         "sign in with your applicant account. Before you join you'll be asked whether the call may be recorded "
+         "for the hiring team's notes. It's your choice and doesn't affect the decision."),
     ):
         await publish_notification(
             db,
@@ -104,7 +110,7 @@ async def schedule_interview(
             recipient=recipient,
             channel="email",
             subject=subject,
-            body=f"Interview for {job_title} at {when} ({duration_minutes} min).{link}",
+            body=f"Interview for {job_title} at {when} ({duration_minutes} min).\nJoin: {room}{backup}{extra}",
             event_type="interview.scheduled",
             payload={"application_id": application_id, "interview_id": interview.id},
             send_now=True,
@@ -113,21 +119,58 @@ async def schedule_interview(
     return interview
 
 
-def calculate_net_salary(annual_base: float) -> tuple[float, float, float]:
-    """Monthly gross, tax and net for a yearly salary (simple progressive brackets)."""
-    gross_monthly = annual_base / 12
-    if gross_monthly < 3000:
-        tax_rate = 0.1
-    elif gross_monthly < 7000:
-        tax_rate = 0.2
-    else:
-        tax_rate = 0.3
-    tax_deduction = gross_monthly * tax_rate
-    return gross_monthly, tax_deduction, gross_monthly - tax_deduction
+def nepal_employee(profile: SalaryProfile) -> nepal_payroll.Employee:
+    """Monthly pay split into basic (which SSF is charged on) and allowances; all basic if no split is set."""
+    gross = profile.annual_base / 12
+    basic = min(profile.basic_monthly or gross, gross)
+    return nepal_payroll.Employee(
+        basic_monthly=basic, allowances_monthly=gross - basic, ssf_enrolled=profile.ssf_enrolled,
+        married=profile.married, female=profile.female, remote_category=profile.remote_category,
+        cit_monthly=profile.cit_monthly or 0, life_insurance_annual=profile.life_insurance_annual or 0,
+        health_insurance_annual=profile.health_insurance_annual or 0,
+    )
 
 
-async def run_org_payroll(db: AsyncSession, organization_id: int, period_start: date, period_end: date) -> dict:
+async def _year_to_date(db: AsyncSession, user_id: int, month: BSMonth) -> nepal_payroll.YearToDate:
+    slips = (await db.execute(
+        select(Payslip).where(Payslip.user_id == user_id, Payslip.fiscal_year == month.fiscal_year,
+                              Payslip.period_end < month.start)
+    )).scalars().all()
+    total = lambda key: sum((s.breakdown or {}).get(key, 0) for s in slips)  # noqa: E731
+    return nepal_payroll.YearToDate(assessable=total("assessable_this_month"),
+                                    retirement=total("retirement_this_month"), tds=total("tds"), sst=total("sst"))
+
+
+def _months_served(joined_on: date | None, month: BSMonth) -> int:
+    if joined_on is None:
+        return 12
+    return max(0, (month.end.year - joined_on.year) * 12 + month.end.month - joined_on.month)
+
+
+async def issue_payslip(
+    db: AsyncSession, profile: SalaryProfile, period_start: date, period_end: date, festival: bool = False
+) -> Payslip:
+    """Work out one person's Nepal payslip for the BS month the period ends in (not yet flushed)."""
+    month = month_of(period_end)
+    emp = nepal_employee(profile)
+    extra = nepal_payroll.festival_allowance(emp.basic_monthly, _months_served(profile.joined_on, month)) if festival else 0
+    b = nepal_payroll.payslip(emp, month, await _year_to_date(db, profile.user_id, month), festival_allowance=extra)
+    slip = Payslip(
+        organization_id=profile.organization_id, user_id=profile.user_id,
+        period_start=period_start, period_end=period_end,
+        gross_amount=b["gross"], tax_deduction=b["tds"], net_amount=b["net"],
+        fiscal_year=month.fiscal_year, bs_year=month.year, bs_month=month.month,
+        ssf_employee=b["ssf_employee"], ssf_employer=b["ssf_employer"], breakdown=b,
+    )
+    db.add(slip)
+    return slip
+
+
+async def run_org_payroll(
+    db: AsyncSession, organization_id: int, period_start: date, period_end: date, festival: bool = False
+) -> dict:
     """Issue payslips for every active person with a salary; anyone already paid for the period is skipped."""
+    month = month_of(period_end)
     profiles = (await db.execute(
         select(SalaryProfile)
         .join(User, User.id == SalaryProfile.user_id)
@@ -136,8 +179,8 @@ async def run_org_payroll(db: AsyncSession, organization_id: int, period_start: 
     already_paid = set((await db.execute(
         select(Payslip.user_id).where(
             Payslip.organization_id == organization_id,
-            Payslip.period_start == period_start,
-            Payslip.period_end == period_end,
+            (Payslip.period_start == period_start) & (Payslip.period_end == period_end)
+            | (Payslip.bs_year == month.year) & (Payslip.bs_month == month.month),
         )
     )).scalars())
 
@@ -145,19 +188,50 @@ async def run_org_payroll(db: AsyncSession, organization_id: int, period_start: 
     for profile in profiles:
         if profile.user_id in already_paid:
             continue
-        gross, tax, net = calculate_net_salary(profile.annual_base)
-        db.add(Payslip(
-            organization_id=organization_id, user_id=profile.user_id,
-            period_start=period_start, period_end=period_end,
-            gross_amount=gross, tax_deduction=tax, net_amount=net,
-        ))
+        slip = await issue_payslip(db, profile, period_start, period_end, festival)
         processed += 1
-        total_net += net
+        total_net += slip.net_amount
     try:
         await db.flush()
     except IntegrityError:
         raise ConflictError("Payroll is already running for this period") from None
-    return {"processed": processed, "skipped": len(already_paid), "total_net": round(total_net, 2)}
+    return {"processed": processed, "skipped": len(already_paid), "total_net": round(total_net, 2),
+            "bs_month": month.label, "fiscal_year": month.fiscal_year}
+
+
+async def remittance(db: AsyncSession, organization_id: int, month: BSMonth) -> dict:
+    """What the employer owes SSF and IRD for one BS month, per person and in total, with due dates."""
+    rows = (await db.execute(
+        select(Payslip, User, SalaryProfile)
+        .join(User, User.id == Payslip.user_id)
+        .outerjoin(SalaryProfile, SalaryProfile.user_id == Payslip.user_id)
+        .where(Payslip.organization_id == organization_id, Payslip.bs_year == month.year,
+               Payslip.bs_month == month.month)
+        .order_by(User.full_name)
+    )).all()
+    people = [{
+        "user_id": user.id, "full_name": user.full_name,
+        "pan": profile.pan if profile else None, "ssf_number": profile.ssf_number if profile else None,
+        "basic": slip.breakdown.get("basic", 0), "gross": slip.gross_amount,
+        "ssf_employee": slip.ssf_employee, "ssf_employer": slip.ssf_employer,
+        "ssf_total": round(slip.ssf_employee + slip.ssf_employer, 2),
+        "sst": slip.breakdown.get("sst", 0), "income_tax": slip.breakdown.get("income_tax", 0),
+        "tds": slip.tax_deduction, "net": slip.net_amount,
+    } for slip, user, profile in rows]
+    total = lambda key: round(sum(p[key] for p in people), 2)  # noqa: E731
+    after = month.end
+    return {
+        "bs_month": month.label, "fiscal_year": month.fiscal_year,
+        "period_start": month.start, "period_end": month.end,
+        "people": people,
+        "ssf": {"employee": total("ssf_employee"), "employer": total("ssf_employer"), "total": total("ssf_total"),
+                # Sources disagree on 15 vs 25 days; the earlier date is the safe one.
+                "due": after + timedelta(days=15)},
+        "ird": {"sst_11211": total("sst"), "income_tax": total("income_tax"), "total": total("tds"),
+                "due": after + timedelta(days=25)},
+        "missing_pan": [p["full_name"] for p in people if not p["pan"]],
+        "missing_ssf_number": [p["full_name"] for p in people if p["ssf_employee"] and not p["ssf_number"]],
+    }
 
 
 def leave_days(leave: LeaveRequest) -> int:

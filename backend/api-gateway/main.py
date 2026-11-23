@@ -1,4 +1,5 @@
 import logging
+import re
 
 import httpx
 import jwt
@@ -65,6 +66,8 @@ app = create_service_app(
 UNSAFE = ("POST", "PUT", "PATCH", "DELETE")
 # Session upkeep is frequent and harmless, so it shares the general API limit instead of the strict sign-in one.
 LENIENT_AUTH_PATHS = {f"{settings.api_v1_prefix}/auth/refresh", f"{settings.api_v1_prefix}/auth/logout"}
+# Call setup messages for in-app interviews: dozens per call and meaningless in an audit trail.
+NOT_AUDITED = re.compile(rf"{re.escape(settings.api_v1_prefix)}/interviews/\d+/room/signal$")
 
 
 def _claims(request: Request) -> dict:
@@ -114,7 +117,7 @@ async def edge_middleware(request: Request, call_next):
     if settings.is_production:
         response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains"
 
-    if path.startswith(settings.api_v1_prefix) and request.method in UNSAFE:
+    if path.startswith(settings.api_v1_prefix) and request.method in UNSAFE and not NOT_AUDITED.match(path):
         claims = _claims(request)
         await write_audit_event(
             actor=claims.get("email"),

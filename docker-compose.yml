@@ -1,4 +1,4 @@
-# Production-shaped stack. `docker compose up --build` runs it locally with demo data;
+# Production-shaped stack. `docker compose up --build` runs it locally (empty; SEED_DEMO_DATA=true adds a sample company);
 # set ENVIRONMENT=production and real secrets in .env for a deployment.
 # Dev hot-reload: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
 
@@ -164,8 +164,8 @@ services:
       context: ./frontend
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
-        # One-click demo sign-in for the seeded workspace. Set false for a real deployment.
-        NEXT_PUBLIC_DEMO_MODE: ${NEXT_PUBLIC_DEMO_MODE:-true}
+        # One-click sign-in to the sample company (needs SEED_DEMO_DATA=true). Off for real use.
+        NEXT_PUBLIC_DEMO_MODE: ${NEXT_PUBLIC_DEMO_MODE:-false}
     image: aihr/frontend
     restart: unless-stopped
     ports:

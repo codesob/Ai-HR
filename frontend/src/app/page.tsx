@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
-import { DemoButton } from "@/components/DemoLauncher";
 import { HiringPreview, MondayTimeline } from "@/components/HomeDemo";
 
 /** Hand-drawn yellow underline. */
@@ -45,13 +44,13 @@ export default function HomePage() {
               and HR questions sit in the same place. You make every call.
             </p>
             <div className="flex flex-wrap gap-3">
-              <DemoButton className="btn-primary px-6 py-3">
-                Open the sample company <ArrowRight className="h-4 w-4" aria-hidden />
-              </DemoButton>
-              <Link href="/signup" className="btn-secondary px-6 py-3">Start free</Link>
+              <Link href="/signup" className="btn-primary px-6 py-3">
+                Set up your company <ArrowRight className="h-4 w-4" aria-hidden />
+              </Link>
+              <Link href="/login" className="btn-secondary px-6 py-3">Sign in</Link>
             </div>
             <div className="flex items-start justify-between gap-4">
-              <p className="text-sm text-muted">No sign-up for the demo. You&apos;ll be HR at a made-up company.</p>
+              <p className="text-sm text-muted">Free to start. Post your first job in a few minutes.</p>
               <p className="note hidden shrink-0 items-center gap-1 lg:flex">
                 <DoodleArrow className="h-6 w-8 -scale-x-100" /> the “why”, every time
               </p>
@@ -93,15 +92,15 @@ export default function HomePage() {
         <div aria-hidden className="absolute -top-20 -right-16 h-56 w-56 rounded-full border-[28px] border-white/10" />
         <div className="relative flex flex-col gap-8 lg:flex-row lg:items-center lg:justify-between">
           <div className="space-y-3">
-            <h2 className="text-5xl text-white">Go poke around.</h2>
-            <p className="max-w-md text-white/80">Open a sample company and click anything. Nothing to install, nothing to sign up for.</p>
+            <h2 className="text-5xl text-white">Bring your first job.</h2>
+            <p className="max-w-md text-white/80">Create your company, post a job and share the link. Invite your team when you&apos;re ready.</p>
           </div>
           <div className="flex flex-wrap gap-3">
-            <DemoButton className="btn-accent px-6 py-3">
-              Open the sample company <ArrowRight className="h-4 w-4" aria-hidden />
-            </DemoButton>
-            <Link href="/signup" className="inline-flex items-center rounded-full border border-white/40 px-6 py-3 font-semibold text-white transition hover:bg-white/10">
-              Create a free workspace
+            <Link href="/signup" className="btn-accent px-6 py-3">
+              Set up your company <ArrowRight className="h-4 w-4" aria-hidden />
+            </Link>
+            <Link href="/login" className="inline-flex items-center rounded-full border border-white/40 px-6 py-3 font-semibold text-white transition hover:bg-white/10">
+              Sign in
             </Link>
           </div>
         </div>

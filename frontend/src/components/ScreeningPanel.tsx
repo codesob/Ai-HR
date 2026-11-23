@@ -133,7 +133,7 @@ export function ScreeningPanel({ applicationId, jobTitle, closed, onChange }: {
 
   return (
     <div className="space-y-4 border-t border-line pt-4">
-      <Label>Task and video screen</Label>
+      <Label>Task and recorded answers</Label>
       {error && <Alert>{error}</Alert>}
 
       {task && (
@@ -155,7 +155,7 @@ export function ScreeningPanel({ applicationId, jobTitle, closed, onChange }: {
         <div className="space-y-3">
           <div className="flex flex-wrap items-center gap-2">
             <Video className="h-4 w-4 text-brand" aria-hidden />
-            <p className="font-semibold">Video screen</p>
+            <p className="font-semibold">Recorded answers</p>
             <span className={clsx("badge", STATUS[screen.status].tone)}>{STATUS[screen.status].label}</span>
             <span className="text-xs text-muted">{screen.answers.length}/{screen.questions.length} answered · due {fmt(screen.due_at)}</span>
           </div>
@@ -178,12 +178,12 @@ export function ScreeningPanel({ applicationId, jobTitle, closed, onChange }: {
           {(!screen || screen.status === "failed" || screen.status === "passed") && (
             <button type="button" className="btn-secondary py-2 text-sm"
               onClick={() => act(() => api.sendVideoScreen(applicationId, { questions: [], due_days: 5 }))}>
-              <Video className="h-4 w-4" aria-hidden /> Send video questions
+              <Video className="h-4 w-4" aria-hidden /> Ask for recorded answers
             </button>
           )}
         </div>
       )}
-      {!task && !screen && <p className="text-xs text-muted">Video questions use three standard prompts about the role. Applicants can answer in English or Nepali.</p>}
+      {!task && !screen && <p className="text-xs text-muted">Recorded answers: the applicant records short replies to three questions in their own time, in English or Nepali. Not a live call; book an interview for that.</p>}
     </div>
   );
 }

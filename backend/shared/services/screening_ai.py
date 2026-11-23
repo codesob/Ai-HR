@@ -72,30 +72,64 @@ async def review_video_answers(job: Job | None, questions: list[str], transcript
     return await _review(f"{_job_brief(job)}\n\nVideo screening answers, transcribed:\n\n{qa[:9000]}")
 
 
-async def transcribe(data: bytes, filename: str, content_type: str, language: str | None = None) -> str:
-    """Speech to text with Whisper on the same OpenAI-compatible provider. Empty string if unavailable.
-    `language` ("en", "ne") matters: without it Whisper often mistakes Nepali for another language."""
+async def _whisper(data: bytes, filename: str, content_type: str, language: str | None,
+                   response_format: str, extra: dict | None = None) -> httpx.Response | None:
     s = get_settings()
     api_key = s.agent_llm_api_key or s.groq_api_key
     if not api_key:
-        return ""
+        return None
     try:
-        async with httpx.AsyncClient(timeout=120) as client:
+        async with httpx.AsyncClient(timeout=180) as client:
             res = await client.post(
                 f"{s.agent_llm_base_url.rstrip('/')}/audio/transcriptions",
                 headers={"Authorization": f"Bearer {api_key}"},
                 files={"file": (filename, data, content_type)},
-                data={"model": s.transcription_model, "response_format": "text",
-                      **({"language": language} if language else {})},
+                data={"model": s.transcription_model, "response_format": response_format,
+                      **({"language": language} if language else {}), **(extra or {})},
             )
         res.raise_for_status()
-        text = res.text.strip()
-        # Whisper invents filler ("you", "Thank you.") from silence or noise; that isn't an answer.
-        return text if len(text.split()) >= 3 else ""
+        return res
     except httpx.HTTPError as exc:
         detail = exc.response.text[:200] if isinstance(exc, httpx.HTTPStatusError) else str(exc)
         logger.warning("Transcription failed: %s", detail)
-        return ""
+        return None
+
+
+async def transcribe(data: bytes, filename: str, content_type: str, language: str | None = None) -> str:
+    """Speech to text with Whisper on the same OpenAI-compatible provider. Empty string if unavailable.
+    `language` ("en", "ne") matters: without it Whisper often mistakes Nepali for another language."""
+    res = await _whisper(data, filename, content_type, language, "text")
+    text = res.text.strip() if res else ""
+    # Whisper invents filler ("you", "Thank you.") from silence or noise; that isn't an answer.
+    return text if len(text.split()) >= 3 else ""
+
+
+FILLER = {"you", "thank you.", "thank you", "thanks for watching!", "bye.", "."}
+
+
+async def transcribe_timed(data: bytes, filename: str, content_type: str,
+                           language: str | None = None) -> list[tuple[float, str]]:
+    """Speech to text with start times (seconds into the audio), for putting two speakers' tracks in order.
+    Stretches Whisper thinks are silence, and the filler it invents from silence, are dropped."""
+    res = await _whisper(data, filename, content_type, language, "verbose_json",
+                         {"timestamp_granularities[]": ["word", "segment"]})
+    if not res:
+        return []
+    try:
+        body = res.json()
+    except ValueError:
+        return []
+    # A segment's own start often swallows the silence before it; its first word's start is when speech begins.
+    word_starts = sorted(float(w.get("start") or 0) for w in body.get("words") or [])
+    out = []
+    for seg in body.get("segments") or []:
+        text = str(seg.get("text", "")).strip()
+        if not text or text.lower() in FILLER or float(seg.get("no_speech_prob") or 0) > 0.6:
+            continue
+        start, end = float(seg.get("start") or 0), float(seg.get("end") or 0)
+        first_word = next((w for w in word_starts if start <= w < end), start)
+        out.append((first_word, text))
+    return out
 
 
 DEVANAGARI = re.compile(r"[ऀ-ॿ]")

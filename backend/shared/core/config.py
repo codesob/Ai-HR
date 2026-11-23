@@ -42,7 +42,8 @@ class Settings(BaseSettings):
     db_max_overflow: int = 10
     # Schema is created by Alembic in production; dev/test may bootstrap it directly.
     auto_create_schema: bool | None = None
-    seed_demo_data: bool | None = None
+    # A made-up sample company for showing the product. Off unless asked for.
+    seed_demo_data: bool = False
 
     redis_url: str = "redis://localhost:6379/0"
     qdrant_url: str = "http://localhost:6333"
@@ -68,6 +69,11 @@ class Settings(BaseSettings):
     max_video_mb: int = 40
     # Live interviews get a video room here when no link is given.
     meeting_base_url: str = "https://meet.jit.si"
+    # Network helpers for the in-app interview call (JSON list of RTCIceServer). STUN is enough for most networks;
+    # add a TURN server for people behind strict office or mobile firewalls.
+    webrtc_ice_servers: str = '[{"urls": ["stun:stun.l.google.com:19302", "stun:stun.cloudflare.com:3478"]}]'
+    # Largest piece of interview audio the interviewer's browser uploads (a few minutes each).
+    max_interview_audio_mb: int = 20
 
     # Vision model that reads scanned PDFs and photos of documents (any OpenAI-compatible API).
     # Defaults to NVIDIA with NVIDIA_API_KEY; a local Ollama works too (http://host.docker.internal:11434/v1).
@@ -121,8 +127,6 @@ class Settings(BaseSettings):
         is_prod = self.environment == "production"
         if self.auto_create_schema is None:
             self.auto_create_schema = not is_prod
-        if self.seed_demo_data is None:
-            self.seed_demo_data = self.environment == "development"
         if self.cookie_secure is None:
             self.cookie_secure = is_prod
         if is_prod:

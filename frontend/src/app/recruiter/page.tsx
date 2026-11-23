@@ -5,6 +5,7 @@ import clsx from "clsx";
 import { ArrowRight, Briefcase, Check, ChevronDown, CircleAlert, PenLine, Plus, Share2, Users, X } from "lucide-react";
 import { AuthGate } from "@/components/AuthGate";
 import { PageHeader } from "@/components/PageHeader";
+import { InterviewPanel } from "@/components/InterviewPanel";
 import { ScreeningPanel } from "@/components/ScreeningPanel";
 import { Alert, Avatar, EmptyState, Label, MiniBar } from "@/components/ui";
 import { api, type Job, type RankedCandidate } from "@/lib/api";
@@ -192,6 +193,7 @@ function CandidateDetail({ c, jobTitle, onStatus, onChanged }: {
       </div>
 
       <ScreeningPanel applicationId={c.application_id} jobTitle={jobTitle} closed={done} onChange={onChanged} />
+      <InterviewPanel applicationId={c.application_id} closed={done} onChange={onChanged} />
 
       <div className="border-t border-line pt-3">
         <button type="button" className="flex w-full items-center justify-between py-1 text-sm font-semibold text-ink" aria-expanded={open} onClick={() => setOpen((o) => !o)}>

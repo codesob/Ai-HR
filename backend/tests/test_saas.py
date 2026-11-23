@@ -201,7 +201,7 @@ async def test_org_payroll_run_pays_everyone_once_and_stays_scoped(clients):
     first = (await pay.post(f"{API}/payroll/run-all", json=period, headers=admin_a)).json()
     assert first["processed"] == 1 and first["skipped"] == 0 and first["total_net"] > 0
     again = (await pay.post(f"{API}/payroll/run-all", json=period, headers=admin_a)).json()
-    assert again == {"processed": 0, "skipped": 1, "total_net": 0}
+    assert again == {"processed": 0, "skipped": 1, "total_net": 0, "bs_month": "Kartik 2083", "fiscal_year": "2083/84"}
     assert (await pay.post(f"{API}/payroll/run-all", json=period, headers=bearer(b))).json()["processed"] == 0
     assert (await pay.get(f"{API}/payroll/profiles", headers=admin_a)).json()[0]["last_period_end"] == "2026-10-31"
 

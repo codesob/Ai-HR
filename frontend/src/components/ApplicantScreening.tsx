@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, Circle, Square, Video } from "lucide-react";
+import Link from "next/link";
+import { CalendarDays, Check, Circle, Square, Video } from "lucide-react";
 import { Alert } from "@/components/ui";
-import { api, type MyScreening } from "@/lib/api";
+import { api, type MyInterview, type MyScreening } from "@/lib/api";
 
 const MAX_SECONDS = 120;
 const due = (iso: string) => new Date(iso).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
@@ -112,9 +113,10 @@ function Recorder({ onSend }: { onSend: (blob: Blob) => Promise<void> }) {
   );
 }
 
-/** Tasks and video questions the hiring team sent this applicant. */
+/** Interviews, tasks and recorded-answer questions the hiring team sent this applicant. */
 export function ApplicantScreening() {
   const [data, setData] = useState<MyScreening | null>(null);
+  const [interviews, setInterviews] = useState<MyInterview[]>([]);
   const [drafts, setDrafts] = useState<Record<number, string>>({});
   const [recording, setRecording] = useState<{ screen: number; index: number } | null>(null);
   // Telling the transcriber the language matters a lot for Nepali.
@@ -122,13 +124,29 @@ export function ApplicantScreening() {
   const [error, setError] = useState("");
   const load = useCallback(() => api.myScreening().then(setData).catch((e) => setError(e.message)), []);
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => { api.myInterviews().then(setInterviews).catch(() => undefined); }, []);
 
-  if (!data || (data.assessments.length === 0 && data.video_screens.length === 0)) return null;
+  const upcoming = interviews.filter((i) => i.status === "scheduled");
+  if (!data || (data.assessments.length === 0 && data.video_screens.length === 0 && upcoming.length === 0)) return null;
 
   return (
     <section className="space-y-4">
       <h2 className="text-2xl">Things to do</h2>
       {error && <Alert>{error}</Alert>}
+
+      {upcoming.map((i) => (
+        <div key={i.id} className="card flex flex-wrap items-center gap-4">
+          <CalendarDays className="h-6 w-6 text-brand" aria-hidden />
+          <div className="min-w-0 flex-1">
+            <p className="text-xs text-muted">{i.job_title} · interview</p>
+            <h3 className="font-display text-xl">
+              {new Date(i.scheduled_at).toLocaleString(undefined, { weekday: "long", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" })}
+            </h3>
+            <p className="text-sm text-muted">{i.duration_minutes} min video call in your browser</p>
+          </div>
+          <Link href={`/interview/${i.id}`} className="btn-primary">Join interview</Link>
+        </div>
+      ))}
 
       {data.assessments.map((t) => (
         <div key={t.id} className="card space-y-3">
@@ -169,8 +187,8 @@ export function ApplicantScreening() {
         return (
           <div key={s.id} className="card space-y-4">
             <div>
-              <p className="text-xs text-muted">{s.job_title} · video questions</p>
-              <h3 className="font-display text-xl">Record short answers</h3>
+              <p className="text-xs text-muted">{s.job_title} · recorded answers (not the interview)</p>
+              <h3 className="font-display text-xl">Record short answers in your own time</h3>
               {s.status === "invited" && (
                 <p className="text-sm text-muted">About a minute each. Due {due(s.due_at)}. You can redo any answer before you finish.</p>
               )}

@@ -8,7 +8,8 @@ import { Alert, Avatar, EmptyState, StatusBadge } from "@/components/ui";
 import { api, type LeaveRequest, type Payslip } from "@/lib/api";
 import type { SessionUser } from "@/lib/auth";
 
-const money = (n: number) => n.toLocaleString(undefined, { style: "currency", currency: "USD" });
+const money = (n: number) =>
+  new Intl.NumberFormat("en-IN", { style: "currency", currency: "NPR", maximumFractionDigits: 0 }).format(n);
 const LEAVE_LABELS: Record<string, string> = { annual: "Annual leave", sick: "Sick leave", unpaid: "Unpaid leave", maternity: "Parental leave" };
 
 function fmtDate(iso: string) {
@@ -167,21 +168,34 @@ function Employee({ user }: { user: SessionUser }) {
                 <tr>
                   <th className="py-2 pr-4 font-medium">Period</th>
                   <th className="py-2 pr-4 text-right font-medium">Gross</th>
-                  <th className="py-2 pr-4 text-right font-medium">Tax</th>
+                  <th className="py-2 pr-4 text-right font-medium">SSF</th>
+                  <th className="py-2 pr-4 text-right font-medium">Tax (TDS)</th>
                   <th className="py-2 text-right font-medium">Net pay</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-line tabular-nums">
-                {payslips.map((p) => (
-                  <tr key={p.id}>
-                    <td className="py-2.5 pr-4 text-ink">
-                      {new Date(`${p.period_start}T00:00:00`).toLocaleDateString(undefined, { month: "long", year: "numeric" })}
-                    </td>
-                    <td className="py-2.5 pr-4 text-right text-muted">{money(p.gross_amount)}</td>
-                    <td className="py-2.5 pr-4 text-right text-muted">−{money(p.tax_deduction)}</td>
-                    <td className="py-2.5 text-right font-semibold text-ink">{money(p.net_amount)}</td>
-                  </tr>
-                ))}
+                {payslips.map((p) => {
+                  const b = p.breakdown;
+                  return (
+                    <tr key={p.id} className="align-top">
+                      <td className="py-2.5 pr-4 text-ink">
+                        {b.bs_month ?? new Date(`${p.period_start}T00:00:00`).toLocaleDateString(undefined, { month: "long", year: "numeric" })}
+                        {b.projection && (
+                          <span className="block max-w-md text-xs text-muted">
+                            {b.festival_allowance ? `Includes ${money(b.festival_allowance)} Dashain allowance. ` : ""}
+                            Tax for FY {b.fiscal_year}: {money(b.projection.annual_tax)} on {money(b.projection.taxable)} expected
+                            taxable income, after {money(b.projection.retirement_deduction)} retirement deduction; spread over the{" "}
+                            {b.projection.months_left} months left.
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-2.5 pr-4 text-right text-muted">{money(p.gross_amount)}</td>
+                      <td className="py-2.5 pr-4 text-right text-muted">−{money(p.ssf_employee ?? 0)}</td>
+                      <td className="py-2.5 pr-4 text-right text-muted">−{money(p.tax_deduction)}</td>
+                      <td className="py-2.5 text-right font-semibold text-ink">{money(p.net_amount)}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

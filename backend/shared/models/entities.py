@@ -168,8 +168,40 @@ class Interview(Base):
     duration_minutes: Mapped[int] = mapped_column(Integer, default=60)
     meeting_link: Mapped[str | None] = mapped_column(String(512), nullable=True)
     interviewer_email: Mapped[str] = mapped_column(String(255))
+    # scheduled → completed (call ended) | cancelled
     status: Mapped[str] = mapped_column(String(32), default="scheduled")
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Suggested questions the AI prepared from the resume and screening: [{"question", "why"}]
+    prep_questions: Mapped[list] = mapped_column(JSON, default=list)
+    # The applicant's own answer in the call room; nothing is recorded without True.
+    recording_consent: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    recording_consent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    recording_on: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Audio parts: [{"part", "track": "interviewer"|"candidate", "offset", "file", "content_type", "language"}]
+    recording: Mapped[list] = mapped_column(JSON, default=list)
+    # [{"at": seconds, "speaker": "interviewer"|"candidate", "text"}], filled after the call
+    transcript: Mapped[list] = mapped_column(JSON, default=list)
+    transcript_english: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # AI notes for the interviewer: overview, evidence per skill, strengths, concerns, follow-ups
+    summary: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    summary_status: Mapped[str] = mapped_column(String(16), default="")  # "", processing, ready, failed
+    # The interviewer's own rating: {"rating": 1-5, "recommendation", "notes", "by", "at"}
+    scorecard: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class InterviewSignal(Base):
+    """WebRTC call setup messages (offer, answer, network candidates) passed between the two browsers."""
+
+    __tablename__ = "interview_signals"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    interview_id: Mapped[int] = mapped_column(ForeignKey("interviews.id", ondelete="CASCADE"), index=True)
+    to_role: Mapped[str] = mapped_column(String(16))  # interviewer | candidate
+    kind: Mapped[str] = mapped_column(String(16))
+    data: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class OnboardingTask(Base):

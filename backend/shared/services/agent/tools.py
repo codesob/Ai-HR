@@ -27,6 +27,7 @@ from shared.models.entities import (
 )
 from shared.models.leave import LeaveRequest, LeaveStatus, LeaveType
 from shared.models.payroll import Payslip, SalaryProfile
+from shared.services.nepal.calendar import BSMonth, last_completed_month, month_of
 from shared.models.screening import Assessment, VideoScreen
 from shared.services import handbook, hr_actions, screening
 from shared.services.events import publish_notification
@@ -129,17 +130,29 @@ async def _application(ctx: Ctx, application_id: int) -> Application:
 
 
 def _month_bounds(month: str) -> tuple[date, date]:
+    """First and last AD day of a month given as YYYY-MM: a Nepali (BS) month for years from 2070, else AD."""
     try:
         year, mon = (int(p) for p in month.split("-"))
+        if year >= 2070:
+            bs = BSMonth(year, mon)
+            if not 1 <= mon <= 12:
+                raise ValueError
+            return bs.start, bs.end
         start = date(year, mon, 1)
     except ValueError:
-        raise ToolError("month must look like 2026-09") from None
+        raise ToolError("month must look like 2083-06 (Nepali year and month)") from None
     return start, date(year, mon, calendar.monthrange(year, mon)[1])
 
 
+def _month_label(month: str) -> str:
+    year, mon = (int(p) for p in month.split("-"))
+    return BSMonth(year, mon).label if year >= 2070 else date(year, mon, 1).strftime("%B %Y")
+
+
 def _last_month() -> str:
-    first = _today().replace(day=1)
-    return (first - timedelta(days=1)).strftime("%Y-%m")
+    """The last Nepali month that has fully ended, as YYYY-MM in BS."""
+    bs = last_completed_month(_today())
+    return f"{bs.year}-{bs.month:02d}"
 
 
 def _business_days_until(day: date) -> int:
@@ -402,24 +415,29 @@ async def decide_leave(ctx: Ctx, leave_id: int, decision: str) -> dict:
 
 @tool("run_payroll", "Pay everyone with a salary for one month and create their payslips. Always sent to a person to "
       "approve first. People already paid for that month are skipped.", ADMIN,
-      {"month": {"type": "string", "description": "YYYY-MM; usually last month"}}, ["month"], approval=True)
+      {"month": {"type": "string", "description": "Nepali (BS) month as YYYY-MM, e.g. 2083-06 for Asoj 2083; "
+                 "usually the last month that has ended"}}, ["month"], approval=True)
 async def run_payroll(ctx: Ctx, month: str) -> dict:
     start, end = _month_bounds(month)
     if end >= _today():
         raise ToolError("That month hasn't ended yet.")
     if not ctx.approved:
+        bs = month_of(end)
         paid = set((await ctx.db.execute(
-            select(Payslip.user_id).where(Payslip.organization_id == ctx.organization_id,
-                                          Payslip.period_start == start, Payslip.period_end == end)
+            select(Payslip.user_id).where(
+                Payslip.organization_id == ctx.organization_id,
+                (Payslip.period_start == start) & (Payslip.period_end == end)
+                | (Payslip.bs_year == bs.year) & (Payslip.bs_month == bs.month))
         )).scalars())
         rows = [(uid, base) for uid, base in (await ctx.db.execute(
             select(SalaryProfile.user_id, SalaryProfile.annual_base).join(User, User.id == SalaryProfile.user_id)
             .where(SalaryProfile.organization_id == ctx.organization_id, User.is_active)
         )).all() if uid not in paid]
         if not rows:
-            raise ToolError(f"Everyone with a salary is already paid for {start:%B %Y}.")
+            raise ToolError(f"Everyone with a salary is already paid for {_month_label(month)}.")
         gross = sum(base / 12 for _, base in rows)
-        raise NeedsApproval(f"Run payroll for {start:%B %Y}: {len(rows)} people, about ${gross:,.0f} before tax")
+        raise NeedsApproval(f"Run payroll for {_month_label(month)}: {len(rows)} people, "
+                            f"about NPR {gross:,.0f} before SSF and tax")
     try:
         return await hr_actions.run_org_payroll(ctx.db, ctx.organization_id, start, end)
     except hr_actions.ConflictError as exc:
