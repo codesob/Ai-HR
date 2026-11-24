@@ -1,3 +1,4 @@
+import uuid
 from functools import lru_cache
 
 import numpy as np
@@ -55,10 +56,18 @@ def cosine_similarity(a: list[float], b: list[float]) -> float:
     return float(np.dot(va, vb) / (np.linalg.norm(va) * np.linalg.norm(vb) + 1e-9))
 
 
-def _point_id(key: str | int) -> int:
-    if isinstance(key, int):
-        return key
-    return abs(hash(key)) % (2**63 - 1)
+_POINT_ID_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "https://github.com/codesob/Ai-HR/qdrant-points")
+
+
+def _point_id(key: str | int) -> str:
+    """Deterministic Qdrant point ID for a document key.
+
+    Python's built-in hash() is randomised per process (PYTHONHASHSEED), so using it
+    gave the same document a different ID after every restart and in every service.
+    Upserts then never overwrote the old vector and duplicates piled up. UUIDv5 is
+    stable across processes, restarts and services.
+    """
+    return str(uuid.uuid5(_POINT_ID_NAMESPACE, str(key)))
 
 
 def upsert_vector(collection: str, point_id: str | int, text: str, payload: dict) -> None:
