@@ -1,13 +1,3 @@
-import uuid
-from functools import lru_cache
-
-import numpy as np
-from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, PointStruct, VectorParams
-from sentence_transformers import SentenceTransformer
-
-from shared.core.config import get_settings
-
 import logging
 import uuid
 from functools import lru_cache
@@ -28,18 +18,11 @@ COLLECTION_RESUMES = "resumes"
 COLLECTION_JOBS = "jobs"
 COLLECTION_KNOWLEDGE = "hr_knowledge"
 VECTOR_SIZE = 384  # all-MiniLM-L6-v2
-
-
-@lru_cache
-def get_encoder() -> SentenceTransformer:
-    settings = get_settings()
-    return SentenceTransformer(settings.embedding_model)
 _POINT_NAMESPACE = uuid.UUID("6f1c7a52-3d0e-4b8a-9a57-0c2a1e6e9b11")
 
 
 @lru_cache
 def get_encoder() -> "SentenceTransformer":
-    # Imported lazily: torch is only installed in the services that embed text.
     from sentence_transformers import SentenceTransformer
 
     return SentenceTransformer(get_settings().embedding_model)
@@ -48,13 +31,6 @@ def get_encoder() -> "SentenceTransformer":
 @lru_cache
 def get_qdrant() -> QdrantClient:
     settings = get_settings()
-    qdrant_kwargs = {"url": settings.qdrant_url}
-    if settings.qdrant_api_key:
-        qdrant_kwargs["api_key"] = settings.qdrant_api_key
-    return QdrantClient(**qdrant_kwargs)
-
-
-def ensure_collections() -> None:
     return QdrantClient(url=settings.qdrant_url, api_key=settings.qdrant_api_key, timeout=10)
 
 
@@ -72,18 +48,6 @@ def ensure_collections() -> None:
                 collection_name=name,
                 vectors_config=VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE),
             )
-
-
-def embed_text(text: str) -> list[float]:
-    encoder = get_encoder()
-    vector = encoder.encode(text, normalize_embeddings=True)
-    return vector.tolist()
-
-
-def embed_batch(texts: list[str]) -> list[list[float]]:
-    encoder = get_encoder()
-    vectors = encoder.encode(texts, normalize_embeddings=True)
-    return [v.tolist() for v in vectors]
             client.create_payload_index(name, field_name="organization_id", field_schema="integer")
     _collections_ready = True
 
@@ -101,42 +65,12 @@ def cosine_similarity(a: list[float], b: list[float]) -> float:
     return float(np.dot(va, vb) / (np.linalg.norm(va) * np.linalg.norm(vb) + 1e-9))
 
 
-_POINT_ID_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "https://github.com/codesob/Ai-HR/qdrant-points")
+def point_id(key: str | int) -> str:
+    return str(uuid.uuid5(_POINT_NAMESPACE, str(key)))
 
 
 def _point_id(key: str | int) -> str:
-    """Deterministic Qdrant point ID for a document key.
-
-    Python's built-in hash() is randomised per process (PYTHONHASHSEED), so using it
-    gave the same document a different ID after every restart and in every service.
-    Upserts then never overwrote the old vector and duplicates piled up. UUIDv5 is
-    stable across processes, restarts and services.
-    """
-    return str(uuid.uuid5(_POINT_ID_NAMESPACE, str(key)))
-
-
-def upsert_vector(collection: str, point_id: str | int, text: str, payload: dict) -> None:
-    ensure_collections()
-    client = get_qdrant()
-    vector = embed_text(text)
-    client.upsert(
-        collection_name=collection,
-        points=[PointStruct(id=_point_id(point_id), vector=vector, payload=payload)],
-    )
-
-
-def search_similar(collection: str, query: str, limit: int = 5) -> list[dict]:
-    ensure_collections()
-    client = get_qdrant()
-    vector = embed_text(query)
-    results = client.search(collection_name=collection, query_vector=vector, limit=limit)
-    return [
-        {"score": hit.score, "payload": hit.payload}
-        for hit in results
-    ]
-def point_id(key: str | int) -> str:
-    """Deterministic across processes and restarts (unlike the builtin hash())."""
-    return str(uuid.uuid5(_POINT_NAMESPACE, str(key)))
+    return point_id(key)
 
 
 def _org_filter(organization_id: int | None) -> Filter | None:
@@ -146,12 +80,11 @@ def _org_filter(organization_id: int | None) -> Filter | None:
 
 
 def upsert_vector(collection: str, key: str | int, text: str, payload: dict) -> None:
-    """Best-effort indexing: a vector store outage must not fail the user's request."""
     try:
         ensure_collections()
         get_qdrant().upsert(
             collection_name=collection,
-            points=[PointStruct(id=point_id(key), vector=embed_text(text), payload=payload)],
+            points=[PointStruct(id=_point_id(key), vector=embed_text(text), payload=payload)],
         )
     except Exception:
         logger.exception("Vector upsert failed", extra={"collection": collection})
