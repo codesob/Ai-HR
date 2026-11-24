@@ -23,7 +23,6 @@ _POINT_NAMESPACE = uuid.UUID("6f1c7a52-3d0e-4b8a-9a57-0c2a1e6e9b11")
 
 @lru_cache
 def get_encoder() -> "SentenceTransformer":
-    # Imported lazily: torch is only installed in the services that embed text.
     from sentence_transformers import SentenceTransformer
 
     return SentenceTransformer(get_settings().embedding_model)
@@ -67,8 +66,11 @@ def cosine_similarity(a: list[float], b: list[float]) -> float:
 
 
 def point_id(key: str | int) -> str:
-    """Deterministic across processes and restarts (unlike the builtin hash())."""
     return str(uuid.uuid5(_POINT_NAMESPACE, str(key)))
+
+
+def _point_id(key: str | int) -> str:
+    return point_id(key)
 
 
 def _org_filter(organization_id: int | None) -> Filter | None:
@@ -78,12 +80,11 @@ def _org_filter(organization_id: int | None) -> Filter | None:
 
 
 def upsert_vector(collection: str, key: str | int, text: str, payload: dict) -> None:
-    """Best-effort indexing: a vector store outage must not fail the user's request."""
     try:
         ensure_collections()
         get_qdrant().upsert(
             collection_name=collection,
-            points=[PointStruct(id=point_id(key), vector=embed_text(text), payload=payload)],
+            points=[PointStruct(id=_point_id(key), vector=embed_text(text), payload=payload)],
         )
     except Exception:
         logger.exception("Vector upsert failed", extra={"collection": collection})
