@@ -1,0 +1,4 @@
+# Embedding model deps, installed only in services that compute embeddings
+# (resume-parsing, matching-engine, chatbot). Torch comes from the CPU wheel index in the Dockerfile.
+-c requirements.txt
+sentence-transformers

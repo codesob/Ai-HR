@@ -1,7 +1,7 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, Enum, Float, ForeignKey, Integer, String, Text, func
+from sqlalchemy import JSON, Boolean, DateTime, Enum, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from shared.db.session import Base
@@ -24,23 +24,90 @@ class ApplicationStatus(str, enum.Enum):
     REJECTED = "rejected"
 
 
+def _org_fk() -> Mapped[int]:
+    return mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+
+
+class Organization(Base):
+    """Tenant root. Every tenant-owned row carries an organization_id."""
+
+    __tablename__ = "organizations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(255))
+    slug: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    plan: Mapped[str] = mapped_column(String(32), default="free")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class User(Base):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    organization_id: Mapped[int] = _org_fk()
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     hashed_password: Mapped[str] = mapped_column(String(255))
     full_name: Mapped[str] = mapped_column(String(255))
     role: Mapped[UserRole] = mapped_column(Enum(UserRole), default=UserRole.CANDIDATE)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
+    organization: Mapped["Organization"] = relationship(lazy="joined")
     applications: Mapped[list["Application"]] = relationship(back_populates="candidate")
+
+
+class AuthSession(Base):
+    """One signed-in device. Access tokens carry its id, so revoking it signs that device out immediately."""
+
+    __tablename__ = "auth_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    # Rotated on every refresh; only the hash is stored.
+    refresh_token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    user_agent: Mapped[str] = mapped_column(String(255), default="")
+    ip: Mapped[str] = mapped_column(String(64), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_used_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class UserToken(Base):
+    """Single-use emailed token (password reset, email verification). Only the hash is stored."""
+
+    __tablename__ = "user_tokens"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    purpose: Mapped[str] = mapped_column(String(32))
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Invitation(Base):
+    __tablename__ = "invitations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    organization_id: Mapped[int] = _org_fk()
+    email: Mapped[str] = mapped_column(String(255), index=True)
+    role: Mapped[UserRole] = mapped_column(Enum(UserRole))
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    invited_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class Job(Base):
     __tablename__ = "jobs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    organization_id: Mapped[int] = _org_fk()
     title: Mapped[str] = mapped_column(String(255))
     department: Mapped[str] = mapped_column(String(128), default="Engineering")
     description: Mapped[str] = mapped_column(Text)
@@ -59,7 +126,8 @@ class CandidateProfile(Base):
     __tablename__ = "candidate_profiles"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), unique=True)
+    organization_id: Mapped[int] = _org_fk()
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True)
     resume_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     parsed_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     skills: Mapped[list] = mapped_column(JSON, default=list)
@@ -70,16 +138,20 @@ class CandidateProfile(Base):
 
 class Application(Base):
     __tablename__ = "applications"
+    __table_args__ = (UniqueConstraint("job_id", "candidate_id", name="uq_application_job_candidate"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    job_id: Mapped[int] = mapped_column(ForeignKey("jobs.id"))
-    candidate_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    organization_id: Mapped[int] = _org_fk()
+    job_id: Mapped[int] = mapped_column(ForeignKey("jobs.id", ondelete="CASCADE"), index=True)
+    candidate_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     status: Mapped[ApplicationStatus] = mapped_column(
         Enum(ApplicationStatus), default=ApplicationStatus.APPLIED
     )
+    source: Mapped[str] = mapped_column(String(64), default="careers_page")
     match_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     rank_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     match_explanation: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    hired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     job: Mapped["Job"] = relationship(back_populates="applications")
@@ -90,19 +162,53 @@ class Interview(Base):
     __tablename__ = "interviews"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    application_id: Mapped[int] = mapped_column(ForeignKey("applications.id"))
+    organization_id: Mapped[int] = _org_fk()
+    application_id: Mapped[int] = mapped_column(ForeignKey("applications.id", ondelete="CASCADE"), index=True)
     scheduled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     duration_minutes: Mapped[int] = mapped_column(Integer, default=60)
     meeting_link: Mapped[str | None] = mapped_column(String(512), nullable=True)
     interviewer_email: Mapped[str] = mapped_column(String(255))
+    # scheduled → completed (call ended) | cancelled
     status: Mapped[str] = mapped_column(String(32), default="scheduled")
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Suggested questions the AI prepared from the resume and screening: [{"question", "why"}]
+    prep_questions: Mapped[list] = mapped_column(JSON, default=list)
+    # The applicant's own answer in the call room; nothing is recorded without True.
+    recording_consent: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    recording_consent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    recording_on: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Audio parts: [{"part", "track": "interviewer"|"candidate", "offset", "file", "content_type", "language"}]
+    recording: Mapped[list] = mapped_column(JSON, default=list)
+    # [{"at": seconds, "speaker": "interviewer"|"candidate", "text"}], filled after the call
+    transcript: Mapped[list] = mapped_column(JSON, default=list)
+    transcript_english: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # AI notes for the interviewer: overview, evidence per skill, strengths, concerns, follow-ups
+    summary: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    summary_status: Mapped[str] = mapped_column(String(16), default="")  # "", processing, ready, failed
+    # The interviewer's own rating: {"rating": 1-5, "recommendation", "notes", "by", "at"}
+    scorecard: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class InterviewSignal(Base):
+    """WebRTC call setup messages (offer, answer, network candidates) passed between the two browsers."""
+
+    __tablename__ = "interview_signals"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    interview_id: Mapped[int] = mapped_column(ForeignKey("interviews.id", ondelete="CASCADE"), index=True)
+    to_role: Mapped[str] = mapped_column(String(16))  # interviewer | candidate
+    kind: Mapped[str] = mapped_column(String(16))
+    data: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class OnboardingTask(Base):
     __tablename__ = "onboarding_tasks"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    organization_id: Mapped[int] = _org_fk()
     employee_name: Mapped[str] = mapped_column(String(255))
     employee_email: Mapped[str] = mapped_column(String(255))
     role: Mapped[str] = mapped_column(String(255))
@@ -115,6 +221,9 @@ class AuditLog(Base):
     __tablename__ = "audit_logs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    organization_id: Mapped[int | None] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), index=True, nullable=True
+    )
     actor: Mapped[str] = mapped_column(String(255), default="anonymous")
     action: Mapped[str] = mapped_column(String(64))
     resource: Mapped[str] = mapped_column(String(512))
@@ -126,6 +235,7 @@ class Notification(Base):
     __tablename__ = "notifications"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    organization_id: Mapped[int] = _org_fk()
     recipient: Mapped[str] = mapped_column(String(255), index=True)
     channel: Mapped[str] = mapped_column(String(32), default="in_app")
     subject: Mapped[str] = mapped_column(String(255))
@@ -135,5 +245,9 @@ class Notification(Base):
     payload: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-from shared.models.leave import LeaveRequest, LeaveBalance
-from shared.models.payroll import SalaryProfile, Payslip
+
+from shared.models.leave import LeaveBalance, LeaveRequest  # noqa: E402,F401
+from shared.models.payroll import Payslip, SalaryProfile  # noqa: E402,F401
+from shared.models.agent import AgentAction, AgentRun  # noqa: E402,F401
+from shared.models.handbook import PolicyDocument  # noqa: E402,F401
+from shared.models.screening import Assessment, VideoScreen  # noqa: E402,F401

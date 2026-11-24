@@ -6,7 +6,12 @@ from sqlalchemy.orm import DeclarativeBase
 from shared.core.config import get_settings
 
 settings = get_settings()
-engine = create_async_engine(settings.database_url, echo=False)
+
+_engine_kwargs: dict = {"echo": False, "pool_pre_ping": True}
+if not settings.database_url.startswith("sqlite"):
+    _engine_kwargs.update(pool_size=settings.db_pool_size, max_overflow=settings.db_max_overflow)
+
+engine = create_async_engine(settings.database_url, **_engine_kwargs)
 AsyncSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
@@ -15,6 +20,8 @@ class Base(DeclarativeBase):
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
+    # Use as Depends(get_db, scope="function") so the commit finishes before the response is sent;
+    # otherwise a client that refetches right after a write can read the old data.
     async with AsyncSessionLocal() as session:
         try:
             yield session

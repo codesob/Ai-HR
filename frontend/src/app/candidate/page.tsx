@@ -1,129 +1,167 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { LoginForm } from "@/components/LoginForm";
+import { useCallback, useEffect, useState } from "react";
+import clsx from "clsx";
+import { Check, FileUp, Search } from "lucide-react";
+import { ApplicantScreening } from "@/components/ApplicantScreening";
+import { AuthGate } from "@/components/AuthGate";
 import { PageHeader } from "@/components/PageHeader";
-import { api, Job } from "@/lib/api";
-import { clearToken, getToken } from "@/lib/auth";
+import { Alert, EmptyState } from "@/components/ui";
+import { api, type Application, type Job } from "@/lib/api";
 
-export default function CandidatePage() {
-  const [authed, setAuthed] = useState(false);
+const STEPS = ["applied", "screening", "interview", "offer", "hired"];
+
+function stepIndex(status: string) {
+  if (status === "assessment") return 1;
+  return STEPS.indexOf(status);
+}
+
+function Tracker({ status }: { status: string }) {
+  if (status === "rejected") {
+    return <p className="text-sm text-muted">This role has moved forward with other candidates. Thank you for applying.</p>;
+  }
+  const current = stepIndex(status);
+  return (
+    <ol className="flex items-center gap-1" aria-label={`Current stage: ${status}`}>
+      {STEPS.map((s, i) => (
+        <li key={s} className="flex flex-1 flex-col gap-1.5">
+          <span className={clsx("h-1.5 rounded-full", i <= current ? "bg-brand" : "bg-surface-2")} />
+          <span className={clsx("text-xs capitalize", i === current ? "font-semibold text-ink" : "text-subtle")}>{s}</span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function Candidate() {
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [applications, setApplications] = useState<Application[]>([]);
   const [parsed, setParsed] = useState<Record<string, unknown> | null>(null);
-  const [message, setMessage] = useState("");
+  const [notice, setNotice] = useState<{ tone: "success" | "danger"; text: string } | null>(null);
+  const [uploading, setUploading] = useState(false);
 
-  useEffect(() => {
-    if (getToken()) {
-      setAuthed(true);
-    }
-  }, []);
+  const load = useCallback(
+    () => Promise.all([api.jobs(), api.myApplications()])
+      .then(([j, a]) => {
+        setJobs(j.filter((x) => x.status === "open"));
+        setApplications(a);
+      })
+      .catch((e) => setNotice({ tone: "danger", text: e.message })),
+    [],
+  );
+  useEffect(() => { void load(); }, [load]);
 
-  useEffect(() => {
-    if (!authed) return;
-    api.jobs().then(setJobs).catch(console.error);
-  }, [authed]);
-
-  async function handleApply(jobId: number) {
+  async function apply(jobId: number) {
     try {
       await api.apply(jobId);
-      setMessage("Application submitted with AI match score!");
+      setNotice({ tone: "success", text: "Application sent. Track its progress below." });
+      await load();
     } catch (e) {
-      setMessage(e instanceof Error ? e.message : "Apply failed");
+      setNotice({ tone: "danger", text: e instanceof Error ? e.message : "Could not apply" });
     }
   }
 
-  async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
+  async function upload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+    setUploading(true);
     try {
-      const result = await api.uploadResume(file);
-      setParsed(result);
-      setMessage("Resume parsed successfully");
-    } catch {
-      setMessage("Upload failed — sign in as candidate@aihr.demo first");
+      setParsed(await api.uploadResume(file));
+      setNotice({ tone: "success", text: "Resume read. New applications will use it." });
+    } catch (err) {
+      setNotice({ tone: "danger", text: err instanceof Error ? err.message : "Upload failed" });
+    } finally {
+      setUploading(false);
+      e.target.value = "";
     }
   }
 
-  async function parseSample() {
-    const sample = `John Doe
-john@example.com
-Senior ML Engineer with 6 years experience
-Skills: Python, PyTorch, RAG, FastAPI, Docker, Kubernetes
-BSc Computer Science
-AWS Certified Machine Learning`;
-    try {
-      const result = await api.parseResumeText(sample);
-      setParsed(result);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Resume parsing failed");
-    }
-  }
-
-  function handleLogout() {
-    clearToken();
-    setAuthed(false);
-    setJobs([]);
-    setParsed(null);
-    setMessage("");
-  }
-
-  if (!authed) {
-    return (
-      <div className="space-y-6">
-        <h1 className="text-2xl font-bold">Candidate Portal</h1>
-        <p className="text-slate-400">Use candidate@aihr.demo / demo12345</p>
-        <LoginForm
-          defaultEmail="candidate@aihr.demo"
-          onSuccess={() => {
-            setAuthed(true);
-          }}
-        />
-        <button type="button" className="btn-secondary" onClick={parseSample}>
-          Try resume parser (no login)
-        </button>
-      </div>
-    );
-  }
+  const applied = new Set(applications.map((a) => a.job_id));
+  const skills = (parsed?.skills as string[] | undefined) ?? [];
 
   return (
     <div className="space-y-8">
-      <PageHeader
-        title="Candidate Portal"
-        subtitle="Apply, upload resume, track AI match scores"
-        action={
-          <button type="button" className="btn-secondary w-full sm:w-auto" onClick={handleLogout}>
-            Logout
-          </button>
-        }
-      />
+      <PageHeader title="My applications" subtitle="Step 1: add your resume. Step 2: apply to a job with one click. Then follow your progress here." />
+      {notice && <Alert tone={notice.tone}>{notice.text}</Alert>}
 
-      {message && <p className="text-sm text-indigo-300">{message}</p>}
-
-      <div className="card">
-        <h2 className="font-semibold">Upload Resume</h2>
-        <input type="file" accept=".pdf,.docx,.txt" className="mt-4" onChange={handleUpload} />
-        {parsed && (
-          <pre className="mt-4 overflow-x-auto rounded bg-slate-950 p-4 text-xs">
-            {JSON.stringify(parsed, null, 2)}
-          </pre>
-        )}
-      </div>
-
-      <div className="space-y-4">
-        <h2 className="font-semibold">Open Positions</h2>
-        {jobs.map((j) => (
-          <div key={j.id} className="card flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h3 className="font-medium">{j.title}</h3>
-              <p className="text-sm text-slate-400">{j.department}</p>
-              <p className="mt-2 text-sm line-clamp-2">{j.description}</p>
-            </div>
-            <button type="button" className="btn-primary shrink-0" onClick={() => handleApply(j.id)}>
-              Apply with AI Match
-            </button>
+      <label className={clsx(
+        "flex cursor-pointer flex-col items-center gap-3 rounded-card border-2 border-dashed border-line-strong bg-surface px-6 py-8 text-center transition hover:border-brand/50",
+        uploading && "pointer-events-none opacity-60",
+      )}>
+        <span className="flex h-12 w-12 items-center justify-center rounded-full bg-brand-soft">
+          <FileUp className="h-5 w-5 text-brand-ink" aria-hidden />
+        </span>
+        <span className="font-medium text-ink">{uploading ? "Reading your resume…" : parsed ? "Replace your resume" : "Upload your resume"}</span>
+        <span className="text-sm text-muted">PDF, Word, text, or a photo of your resume (also your LinkedIn profile PDF), up to 5 MB</span>
+        <input type="file" accept=".pdf,.docx,.txt,.md,.png,.jpg,.jpeg,.webp" className="sr-only" disabled={uploading} onChange={upload} />
+      </label>
+      {parsed && (
+        <div className="card space-y-2 p-5">
+          <p className="text-sm font-medium text-ink">
+            We found {skills.length} skill{skills.length === 1 ? "" : "s"} and {String(parsed.experience_years ?? 0)} years of experience
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {skills.map((s) => <span key={s} className="badge bg-brand-soft text-brand-ink">{s}</span>)}
           </div>
-        ))}
-      </div>
+        </div>
+      )}
+
+      <ApplicantScreening />
+
+      {applications.length > 0 && (
+        <section className="space-y-3">
+          <h2 className="text-xl">Your applications</h2>
+          <ul className="space-y-3">
+            {applications.map((a) => (
+              <li key={a.id} className="card space-y-4 p-5">
+                <div className="flex items-baseline justify-between gap-3">
+                  <p className="font-medium text-ink">{a.job_title}</p>
+                  <time className="text-xs text-subtle" dateTime={a.created_at}>
+                    Applied {new Date(a.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                  </time>
+                </div>
+                <Tracker status={a.status} />
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      <section className="space-y-3">
+        <h2 className="text-xl">Jobs you can apply to</h2>
+        {jobs.length === 0 ? (
+          <EmptyState icon={Search} title="No open roles right now">Check back soon.</EmptyState>
+        ) : (
+          <ul className="grid gap-3 md:grid-cols-2">
+            {jobs.map((j) => (
+              <li key={j.id} className="card flex flex-col gap-4 p-5">
+                <div className="flex-1 space-y-1">
+                  <p className="text-xs font-medium text-subtle">{j.department}</p>
+                  <h3 className="font-semibold">{j.title}</h3>
+                  <p className="line-clamp-2 text-sm text-muted">{j.description}</p>
+                </div>
+                {j.required_skills.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {j.required_skills.map((s) => <span key={s} className="badge bg-surface-2 text-ink-soft">{s}</span>)}
+                  </div>
+                )}
+                <button type="button" className={applied.has(j.id) ? "btn-secondary" : "btn-primary"} disabled={applied.has(j.id)}
+                  onClick={() => apply(j.id)}>
+                  {applied.has(j.id) ? <><Check className="h-4 w-4" aria-hidden /> Applied</> : "Apply"}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
     </div>
+  );
+}
+
+export default function CandidatePage() {
+  return (
+    <AuthGate title="My applications" roles={["candidate"]} demoEmail="candidate@aihr.demo">
+      {() => <Candidate />}
+    </AuthGate>
   );
 }

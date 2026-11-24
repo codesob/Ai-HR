@@ -1,0 +1,25 @@
+# Core runtime deps for every backend service. Compile with:
+#   uv pip compile requirements.in --python-version 3.14 --python-platform linux -o requirements.txt
+fastapi
+uvicorn[standard]
+sqlalchemy[asyncio]
+aiosqlite
+asyncpg
+alembic
+pydantic
+pydantic-settings
+email-validator
+python-multipart
+pyjwt
+bcrypt
+redis
+qdrant-client
+numpy
+pypdf
+# Renders scanned PDF pages to images for the vision model.
+pypdfium2
+pillow
+python-docx
+httpx
+aiofiles
+boto3

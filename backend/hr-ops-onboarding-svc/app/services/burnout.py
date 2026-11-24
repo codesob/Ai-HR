@@ -1,4 +1,3 @@
-from datetime import date
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from shared.models.leave import LeaveRequest, LeaveStatus
@@ -13,7 +12,7 @@ async def predict_burnout(user_id: int, db: AsyncSession):
     leaves = result.scalars().all()
     
     # If no leaves taken recently, high risk
-    days_taken = sum((l.end_date - l.start_date).days for l in leaves)
+    days_taken = sum((lv.end_date - lv.start_date).days + 1 for lv in leaves)
     
     if days_taken == 0:
         return {"user_id": user_id, "risk_score": 0.85, "risk_level": "High", "recommendation": "Mandatory time off recommended."}

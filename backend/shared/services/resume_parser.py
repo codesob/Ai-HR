@@ -146,3 +146,44 @@ def parse_resume_text(text: str) -> ParsedResume:
 async def parse_resume_file(file_path: Path) -> ParsedResume:
     text = extract_text_from_file(file_path)
     return parse_resume_text(text)
+
+
+AI_PROMPT = """Read this resume and reply with JSON only, no prose:
+{"name": str|null, "skills": [str], "experience_years": number, "education": str|null,
+ "certifications": [str], "work_experience": [{"title": str, "company": str, "years": str}], "summary": str}
+Rules: skills are concrete professional skills and tools in any field (e.g. Figma, User Research, Bookkeeping, Python),
+named in English even when written in Nepali, at most 25, no soft-skill filler. experience_years is total paid
+professional experience. education is the highest degree with institution, in English. summary is two plain English
+sentences about their work. Leave out anything not in the resume; never guess."""
+
+
+async def parse_resume_smart(text: str) -> ParsedResume:
+    """Pattern parsing, improved by the language model when one is configured. Contact details always come from
+    the patterns, never the model."""
+    import json
+
+    from shared.services.agent import llm
+
+    base = parse_resume_text(text)
+    if not text.strip() or not llm.configured():
+        return base
+    try:
+        reply = await llm.complete([{"role": "system", "content": AI_PROMPT}, {"role": "user", "content": text[:12000]}], [])
+        found = re.search(r"\{.*\}", reply.content, re.DOTALL)
+        data = json.loads(found.group(0)) if found else {}
+    except (llm.AgentLLMError, ValueError):
+        return base
+    skills = [str(s).strip() for s in data.get("skills") or [] if str(s).strip()][:25]
+    try:
+        years = float(data.get("experience_years") or 0)
+    except (TypeError, ValueError):
+        years = 0.0
+    return base.model_copy(update={
+        "name": data.get("name") or base.name,
+        "skills": list(dict.fromkeys(skills + base.skills)) or base.skills,
+        "experience_years": years if 0 < years <= 60 else base.experience_years,
+        "education": data.get("education") or base.education,
+        "certifications": [str(c) for c in data.get("certifications") or []] or base.certifications,
+        "work_experience": [w for w in data.get("work_experience") or [] if isinstance(w, dict)] or base.work_experience,
+        "summary": data.get("summary") or base.summary,
+    })

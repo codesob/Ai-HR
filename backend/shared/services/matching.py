@@ -2,6 +2,7 @@ from typing import Any
 
 from shared.schemas.common import MatchExplanation, ParsedResume
 from shared.services.embeddings import cosine_similarity, embed_text
+from shared.services.nvidia_reranker import rerank_documents
 
 
 def _skill_overlap(candidate_skills: list[str], required: list[str]) -> tuple[list[str], list[str], float]:
@@ -77,3 +78,51 @@ def rank_applications(applications: list[dict[str, Any]]) -> list[dict[str, Any]
         exp_bonus = min(0.1, (parsed.get("experience_years") or 0) * 0.02)
         app["rank_score"] = round(min(1.0, base + cert_bonus + skill_bonus + exp_bonus), 3)
     return sorted(applications, key=lambda x: x.get("rank_score", 0), reverse=True)
+
+
+async def rerank_candidates_with_nvidia(
+    job_description: str,
+    candidates: list[dict[str, Any]],
+    top_k: int | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Rerank candidates using NVIDIA's Nemotron Rerank VL model.
+
+    Args:
+        job_description: The job description/query
+        candidates: List of candidate dictionaries with 'resume_text' or 'text' field
+        top_k: Number of top candidates to return (optional)
+
+    Returns:
+        Reranked candidates with updated scores
+    """
+    # Prepare candidate texts
+    candidate_docs = [
+        {
+            "text": c.get("resume_text", c.get("text", "")),
+            "candidate_id": c.get("id"),
+            "name": c.get("name"),
+            "original_score": c.get("match_score", c.get("rank_score", 0)),
+        }
+        for c in candidates
+    ]
+
+    # Rerank using NVIDIA model
+    reranked = await rerank_documents(job_description, candidate_docs, top_k)
+
+    # Merge reranking scores with original candidate data
+    result = []
+    for idx, reranked_item in enumerate(reranked):
+        candidate_id = reranked_item.get("candidate_id")
+        # Find original candidate
+        original = next((c for c in candidates if c.get("id") == candidate_id), {})
+        
+        result.append({
+            **original,
+            "rerank_score": reranked_item.get("score"),
+            "reranked": reranked_item.get("reranked", False),
+            "rerank_position": idx + 1,
+            "original_score": reranked_item.get("original_score", 0.0),
+        })
+
+    return result

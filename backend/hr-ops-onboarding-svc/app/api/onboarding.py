@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -6,35 +7,48 @@ from shared.api.rbac import require_roles
 from shared.db.session import get_db
 from shared.models.entities import OnboardingTask, User, UserRole
 from shared.schemas.common import OnboardingCreate, OnboardingOut
-from shared.services.onboarding import create_onboarding_plan
+from shared.services.hr_actions import NotFoundError, set_onboarding_task, start_onboarding
 
 router = APIRouter(prefix="/onboarding", tags=["onboarding"])
 
+hr_staff = require_roles(UserRole.ADMIN, UserRole.RECRUITER)
 
-@router.post("", response_model=OnboardingOut)
-async def start_onboarding(
+
+class TaskUpdate(BaseModel):
+    completed: bool
+
+
+@router.post("", response_model=OnboardingOut, status_code=201)
+async def start(
     payload: OnboardingCreate,
-    db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_roles(UserRole.ADMIN, UserRole.RECRUITER)),
+    db: AsyncSession = Depends(get_db, scope="function"),
+    user: User = Depends(hr_staff),
 ):
-    tasks = create_onboarding_plan(payload.employee_name, payload.role)
-    record = OnboardingTask(
-        employee_name=payload.employee_name,
-        employee_email=payload.employee_email,
-        role=payload.role,
-        tasks=tasks,
-        status="in_progress",
+    record, _ = await start_onboarding(
+        db, user.organization_id, payload.employee_name, str(payload.employee_email), payload.role
     )
-    db.add(record)
-    await db.flush()
-    await db.refresh(record)
     return record
 
 
 @router.get("", response_model=list[OnboardingOut])
-async def list_onboarding(
-    db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_roles(UserRole.ADMIN, UserRole.RECRUITER)),
-):
-    result = await db.execute(select(OnboardingTask).order_by(OnboardingTask.created_at.desc()))
+async def list_onboarding(db: AsyncSession = Depends(get_db, scope="function"), user: User = Depends(hr_staff)):
+    result = await db.execute(
+        select(OnboardingTask)
+        .where(OnboardingTask.organization_id == user.organization_id)
+        .order_by(OnboardingTask.created_at.desc())
+    )
     return result.scalars().all()
+
+
+@router.patch("/{onboarding_id}/tasks/{task_id}", response_model=OnboardingOut)
+async def update_task(
+    onboarding_id: int,
+    task_id: str,
+    payload: TaskUpdate,
+    db: AsyncSession = Depends(get_db, scope="function"),
+    user: User = Depends(hr_staff),
+):
+    try:
+        return await set_onboarding_task(db, user.organization_id, onboarding_id, task_id, payload.completed)
+    except NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from None

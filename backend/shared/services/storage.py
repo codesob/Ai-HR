@@ -1,18 +1,63 @@
+import asyncio
+import re
+from functools import lru_cache
 from pathlib import Path
-
-from fastapi import UploadFile
 
 from shared.core.config import get_settings
 
 
-async def save_upload(file: UploadFile, filename: str) -> Path:
+@lru_cache
+def _s3_client():
+    import boto3
+
     settings = get_settings()
-    if settings.storage_backend != "local":
-        # S3-compatible storage is configured here for production wiring; local dev keeps files on disk.
-        # A real deployment should replace this branch with boto3/aioboto3 upload code.
-        raise NotImplementedError("Only local storage is implemented in this MVP runtime")
-    upload_dir = Path(settings.upload_dir)
-    upload_dir.mkdir(parents=True, exist_ok=True)
-    destination = upload_dir / filename
-    destination.write_bytes(await file.read())
-    return destination
+    return boto3.client("s3", region_name=settings.s3_region, endpoint_url=settings.s3_endpoint_url)
+
+
+_SAFE_KEY = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*)*")
+
+
+def _validate_key(key: str) -> None:
+    """Relative, slash-separated segments of safe characters; no '..', empty or hidden segments."""
+    if not _SAFE_KEY.fullmatch(key) or any(part in (".", "..") for part in key.split("/")):
+        raise ValueError(f"Unsafe storage key: {key!r}")
+
+
+async def store_file(data: bytes, key: str, content_type: str | None = None) -> str:
+    """Persist bytes and return a storage reference (local path or s3:// URI)."""
+    settings = get_settings()
+    _validate_key(key)
+    if settings.storage_backend == "s3":
+        extra = {"ContentType": content_type} if content_type else {}
+        await asyncio.to_thread(
+            _s3_client().put_object,
+            Bucket=settings.s3_bucket,
+            Key=key,
+            Body=data,
+            ServerSideEncryption="AES256",
+            **extra,
+        )
+        return f"s3://{settings.s3_bucket}/{key}"
+
+    root = Path(settings.upload_dir).resolve()
+    destination = (root / key).resolve()
+    if not destination.is_relative_to(root):
+        raise ValueError(f"Storage key escapes upload directory: {key!r}")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    await asyncio.to_thread(destination.write_bytes, data)
+    return str(destination)
+
+
+async def read_file(ref: str) -> bytes:
+    """Bytes of a file saved by store_file, given the reference it returned."""
+    settings = get_settings()
+    if ref.startswith("s3://"):
+        bucket, _, key = ref[5:].partition("/")
+        _validate_key(key)
+        obj = await asyncio.to_thread(_s3_client().get_object, Bucket=bucket, Key=key)
+        return await asyncio.to_thread(obj["Body"].read)
+    root = Path(settings.upload_dir).resolve()
+    path = Path(ref).resolve()
+    if not path.is_relative_to(root):
+        raise ValueError("File is outside the upload directory")
+    return await asyncio.to_thread(path.read_bytes)
