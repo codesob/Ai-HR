@@ -1,52 +1,151 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import 'tailwindcss';
 
-:root {
-  --bg: #0f172a;
-  --card: #111827;
-  --border: #334155;
-  --text: #f8fafc;
-  --muted: #94a3b8;
-  --accent: #6366f1;
+/*
+  Design tokens. Components use these semantic names (text-ink, bg-surface, border-line, text-brand …),
+  never raw palette colors, so the whole product can be re-themed here.
+*/
+@theme {
+  --font-sans: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-serif), Georgia, serif;
+  --font-hand: var(--font-caveat), cursive;
+
+  --color-canvas: #faf8f3;
+  --color-surface: #ffffff;
+  --color-surface-2: #f3f0e8;
+  --color-line: #e7e2d6;
+  --color-line-strong: #d3ccbc;
+
+  --color-ink: #10241d;
+  --color-ink-soft: #2c3b35;
+  --color-muted: #5b6862;
+  --color-subtle: #67736d;
+
+  /* Dark surfaces (payroll card, highlighted task). */
+  --color-navy: #10241d;
+  --color-navy-2: #1a3329;
+
+  --color-brand: #155e47;
+  --color-brand-hover: #0f4d3a;
+  --color-brand-soft: #e1f0e8;
+  --color-brand-ink: #155e47;
+
+  --color-accent: #f5c542;
+  --color-accent-hover: #ebb82c;
+  --color-accent-soft: #fdf1cc;
+
+  --color-success: #1d7a4f;
+  --color-success-soft: #e3f3ea;
+  --color-warning: #8f5b00;
+  --color-warning-soft: #fdf1cc;
+  --color-danger: #b42318;
+  --color-danger-soft: #fdeceb;
+
+  --radius-card: 1rem;
+  --shadow-card: 0 1px 2px rgb(16 36 29 / 0.04);
+  --shadow-lift: 0 1px 2px rgb(16 36 29 / 0.04), 0 12px 32px -12px rgb(16 36 29 / 0.18);
 }
 
-html {
-  scroll-behavior: smooth;
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-line);
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-canvas font-sans text-ink antialiased;
+  }
+
+  h1,
+  h2 {
+    @apply font-display font-normal text-ink;
+    text-wrap: balance;
+    letter-spacing: -0.01em;
+  }
+
+  /* The serif defaults to old-style figures; scores and money read better level. */
+  h1,
+  h2,
+  .font-display {
+    --tw-numeric-figure: lining-nums;
+    font-variant-numeric: lining-nums;
+  }
+
+  h3 {
+    @apply text-ink;
+    text-wrap: balance;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-brand);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background-color: var(--color-accent-soft);
+    color: var(--color-ink);
+  }
 }
 
-body {
-  @apply bg-slate-950 text-slate-100 antialiased;
-  background-image:
-    radial-gradient(circle at top left, rgba(99, 102, 241, 0.18), transparent 28%),
-    radial-gradient(circle at bottom right, rgba(56, 189, 248, 0.08), transparent 30%);
-}
+@layer components {
+  .card {
+    @apply rounded-card border border-line bg-surface p-6 shadow-(--shadow-card);
+  }
 
-main {
-  @apply min-h-screen;
-}
+  /* Clickable card. */
+  .card-hover {
+    @apply transition hover:border-line-strong;
+  }
 
-.card {
-  @apply rounded-[2rem] border border-slate-700/60 bg-slate-900/85 p-6 shadow-[0_24px_80px_-48px_rgba(15,23,42,0.9)] backdrop-blur;
-}
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-full bg-brand px-5 py-2.5 text-[0.95rem] font-semibold text-white transition hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-50;
+  }
 
-.btn-primary {
-  @apply inline-flex items-center justify-center rounded-2xl bg-indigo-600 px-5 py-3 font-semibold text-white transition hover:bg-indigo-500 disabled:opacity-50;
-}
+  /* Yellow; for actions on dark or green backgrounds. */
+  .btn-accent {
+    @apply inline-flex items-center justify-center gap-2 rounded-full bg-accent px-5 py-2.5 text-[0.95rem] font-semibold text-ink transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50;
+  }
 
-.btn-secondary {
-  @apply inline-flex items-center justify-center rounded-2xl border border-slate-600 bg-slate-900/90 px-5 py-3 font-semibold text-slate-100 transition hover:border-indigo-500/60 hover:bg-slate-800;
-}
+  .btn-dark {
+    @apply inline-flex items-center justify-center gap-2 rounded-full bg-ink px-5 py-2.5 text-[0.95rem] font-semibold text-white transition hover:bg-ink-soft disabled:cursor-not-allowed disabled:opacity-50;
+  }
 
-.input {
-  @apply w-full rounded-2xl border border-slate-600 bg-slate-900 px-4 py-3 text-slate-100 placeholder:text-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500;
-}
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-full border border-line-strong bg-surface px-5 py-2.5 text-[0.95rem] font-semibold text-ink transition hover:border-ink disabled:cursor-not-allowed disabled:opacity-50;
+  }
 
-.badge {
-  @apply inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium;
-}
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-muted transition hover:bg-surface-2 hover:text-ink;
+  }
 
-::selection {
-  background-color: rgba(99, 102, 241, 0.25);
-  color: #eef2ff;
+  .input {
+    @apply w-full rounded-xl border border-line-strong bg-surface px-4 py-3 text-base text-ink transition placeholder:text-subtle focus:border-brand focus:ring-4 focus:ring-brand/15 focus:outline-hidden;
+  }
+
+  .label {
+    @apply mb-2 block text-sm font-semibold text-ink;
+  }
+
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold;
+  }
+
+  .eyebrow {
+    @apply text-sm font-semibold text-brand;
+  }
+
+  .hint {
+    @apply text-sm text-muted;
+  }
+
+  /* Handwritten margin note. */
+  .note {
+    @apply font-hand text-xl leading-none font-bold text-brand;
+  }
 }

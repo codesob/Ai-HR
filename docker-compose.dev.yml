@@ -1,0 +1,19 @@
+# Hot-reload overlay: mounts source and runs uvicorn --reload. Publishes infra ports for local tools.
+x-dev: &dev
+  environment:
+    WEB_CONCURRENCY: "1"
+  command: ["sh", "-c", "exec uvicorn \"$$APP_MODULE\" --host 0.0.0.0 --port 8000 --reload"]
+
+services:
+  postgres: { ports: ["5432:5432"] }
+  redis: { ports: ["6379:6379"] }
+  qdrant: { ports: ["6333:6333"] }
+  api-gateway: { <<: *dev, volumes: ["./backend/api-gateway/main.py:/app/main.py:ro", "./backend/shared:/app/shared:ro"] }
+  resume-parsing-svc: { <<: *dev, volumes: ["./backend/resume-parsing-svc/app:/app/app:ro", "./backend/shared:/app/shared:ro", "upload_data:/app/uploads"] }
+  matching-engine-svc: { <<: *dev, volumes: ["./backend/matching-engine-svc/app:/app/app:ro", "./backend/shared:/app/shared:ro"] }
+  chatbot-rag-assistant-svc: { <<: *dev, volumes: ["./backend/chatbot-rag-assistant-svc/app:/app/app:ro", "./backend/shared:/app/shared:ro"] }
+  interview-assistant-svc: { <<: *dev, volumes: ["./backend/interview-assistant-svc/app:/app/app:ro", "./backend/shared:/app/shared:ro"] }
+  analytics-dashboard-svc: { <<: *dev, volumes: ["./backend/analytics-dashboard-svc/app:/app/app:ro", "./backend/shared:/app/shared:ro"] }
+  hr-ops-onboarding-svc: { <<: *dev, volumes: ["./backend/hr-ops-onboarding-svc/app:/app/app:ro", "./backend/shared:/app/shared:ro"] }
+  payroll-automation-svc: { <<: *dev, volumes: ["./backend/payroll-automation-svc/app:/app/app:ro", "./backend/shared:/app/shared:ro"] }
+  notification-scheduling-svc: { <<: *dev, volumes: ["./backend/notification-scheduling-svc/app:/app/app:ro", "./backend/shared:/app/shared:ro"] }

@@ -1,9 +1,21 @@
+import asyncio
+import logging
 import uuid
-from pathlib import Path
 
 from shared.core.config import get_settings
-from shared.services.embeddings import COLLECTION_KNOWLEDGE, embed_text, ensure_collections, get_qdrant
+from shared.services.embeddings import (
+    COLLECTION_KNOWLEDGE,
+    embed_batch,
+    ensure_collections,
+    get_qdrant,
+    point_id,
+    search_similar,
+)
+from shared.services.nvidia_reranker import rerank_documents
+from shared.services.ai_llm import get_llm
 from qdrant_client.models import PointStruct
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_KNOWLEDGE = [
     {
@@ -45,31 +57,63 @@ DEFAULT_KNOWLEDGE = [
 
 
 def seed_knowledge_base() -> None:
-    settings = get_settings()
-    knowledge_dir = Path(settings.knowledge_dir)
-    knowledge_dir.mkdir(parents=True, exist_ok=True)
-
+    """Idempotent: point ids are deterministic, so re-seeding overwrites rather than duplicates."""
     ensure_collections()
-    client = get_qdrant()
-    points = []
-    for item in DEFAULT_KNOWLEDGE:
-        from shared.services.embeddings import _point_id
-
-        vector = embed_text(item["text"])
-        points.append(
-            PointStruct(
-                id=_point_id(item["id"]),
-                vector=vector,
-                payload={"text": item["text"], "category": item["category"], "doc_id": item["id"]},
-            )
+    vectors = embed_batch([item["text"] for item in DEFAULT_KNOWLEDGE])
+    points = [
+        PointStruct(
+            id=point_id(item["id"]),
+            vector=vector,
+            # organization_id 0 marks the sample policies; company handbooks are stored under their own id.
+            payload={"text": item["text"], "category": item["category"], "doc_id": item["id"], "organization_id": 0},
         )
-    client.upsert(collection_name=COLLECTION_KNOWLEDGE, points=points)
+        for item, vector in zip(DEFAULT_KNOWLEDGE, vectors, strict=True)
+    ]
+    get_qdrant().upsert(collection_name=COLLECTION_KNOWLEDGE, points=points)
 
 
-def retrieve_context(query: str, top_k: int = 3) -> list[dict]:
-    from shared.services.embeddings import search_similar
+def retrieve_context(query: str, top_k: int = 3, organization_id: int = 0) -> list[dict]:
+    return search_similar(COLLECTION_KNOWLEDGE, query, limit=top_k, organization_id=organization_id)
 
-    return search_similar(COLLECTION_KNOWLEDGE, query, limit=top_k)
+
+async def retrieve_context_with_reranking(
+    query: str, top_k: int = 3, initial_k: int = 10, organization_id: int = 0
+) -> list[dict]:
+    """
+    Retrieve documents with NVIDIA reranking for better relevance.
+
+    Args:
+        query: User query
+        top_k: Number of final results to return
+        initial_k: Number of candidates to rerank from (retrieve more, then rerank down)
+
+    Returns:
+        Reranked context documents
+    """
+    # Get more candidates initially for reranking
+    candidates = await asyncio.to_thread(search_similar, COLLECTION_KNOWLEDGE, query, initial_k, organization_id)
+
+    if not candidates:
+        return []
+
+    # Prepare for reranking
+    doc_texts = [
+        {
+            "text": c["payload"].get("text", ""),
+            "payload": c.get("payload", {}),
+            "id": c.get("id"),
+            "score": c.get("score", 0.0),
+        }
+        for c in candidates
+    ]
+
+    # Rerank with NVIDIA model
+    try:
+        reranked = await rerank_documents(query, doc_texts, top_k)
+        return reranked
+    except Exception:
+        # Fallback to original results if reranking fails
+        return candidates[:top_k]
 
 
 def generate_reply(query: str, contexts: list[dict]) -> tuple[str, list[str]]:
@@ -92,14 +136,96 @@ def generate_reply(query: str, contexts: list[dict]) -> tuple[str, list[str]]:
     return reply, sources
 
 
+def _format_history(history: list[dict] | None) -> str:
+    if not history:
+        return ""
+    turns = "\n".join(f"{m['role'].capitalize()}: {m['content']}" for m in history)
+    return f"Conversation so far:\n{turns}\n\n"
+
+
+async def generate_ai_reply(
+    query: str, contexts: list[dict], history: list[dict] | None = None
+) -> tuple[str, list[str]]:
+    """Generate AI-powered HR chatbot response using LLM."""
+    sources = [c["payload"].get("text", "")[:120] + "..." for c in contexts if c.get("payload")]
+    conversation = _format_history(history)
+
+    if not contexts:
+        llm = await get_llm()
+        try:
+            system = """You are an AI HR assistant. Provide helpful, professional responses about HR policies,
+benefits, and employment practices. Always suggest contacting HR for complex matters."""
+
+            response = await llm.generate(
+                f"{conversation}HR Question: {query}",
+                system=system,
+                max_tokens=200,
+                temperature=0.7
+            )
+            return response, []
+        except Exception:
+            return (
+                "I don't have specific policy information on that yet. "
+                "Please contact HR at hr@company.com or ask your manager.",
+                [],
+            )
+
+    # Build context for LLM
+    context_text = "\n".join([
+        f"- {c['payload'].get('text', '')}"
+        for c in contexts if c.get("payload")
+    ])
+
+    llm = await get_llm()
+    try:
+        system = """You are an expert HR assistant. Use the provided policy information to answer 
+employee questions accurately and professionally. Keep responses concise and actionable."""
+        
+        prompt = f"""
+Policy Context:
+{context_text}
+
+{conversation}Employee Question: {query}
+
+Provide a clear, helpful answer based on the policies above. If information isn't complete, suggest next steps.
+"""
+        
+        response = await llm.generate(prompt, system=system, max_tokens=300, temperature=0.5)
+        return response, sources
+    except Exception:
+        logger.exception("LLM reply failed; using template answer")
+        return generate_reply(query, contexts)
+
+
+# Per-process session memory (the chatbot service runs a single worker); bounded to cap memory use.
 _sessions: dict[str, list[dict]] = {}
+_MAX_SESSIONS = 1000
+_MAX_HISTORY_MESSAGES = 20
 
 
-def chat(message: str, session_id: str | None = None) -> tuple[str, list[str], str]:
+def _remember(sid: str, message: str, reply: str) -> None:
+    history = _sessions.pop(sid, [])
+    history.extend([{"role": "user", "content": message}, {"role": "assistant", "content": reply}])
+    _sessions[sid] = history[-_MAX_HISTORY_MESSAGES:]
+    while len(_sessions) > _MAX_SESSIONS:
+        del _sessions[next(iter(_sessions))]
+
+
+async def chat(message: str, session_id: str | None = None) -> tuple[str, list[str], str]:
     sid = session_id or str(uuid.uuid4())
-    contexts = retrieve_context(message, top_k=3)
-    reply, sources = generate_reply(message, contexts)
-    history = _sessions.setdefault(sid, [])
-    history.append({"role": "user", "content": message})
-    history.append({"role": "assistant", "content": reply})
+    settings = get_settings()
+    history = list(_sessions.get(sid, []))
+    try:
+        if settings.nvidia_api_key:
+            contexts = await retrieve_context_with_reranking(message, top_k=3)
+        else:
+            contexts = await asyncio.to_thread(retrieve_context, message, 3)
+    except Exception:
+        logger.exception("Knowledge retrieval failed")
+        contexts = []
+    if settings.groq_api_key:
+        reply, sources = await generate_ai_reply(message, contexts, history)
+    else:
+        reply, sources = generate_reply(message, contexts)
+    _remember(sid, message, reply)
     return reply, sources, sid
